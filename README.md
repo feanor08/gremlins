@@ -55,7 +55,7 @@ The local model is **optional to the architecture**. Deterministic capabilities 
 
 ### Measured model-routing policy
 
-The first Apple-Silicon Mac model-value run with Ollama + `qwen3.5:4b` established a provisional routing boundary:
+The Apple-Silicon Mac reference measurements with Ollama + `qwen3.5:4b` establish the current routing boundary:
 
 - repository search/read/history and normal `repo_explorer`: deterministic;
 - `repo_explorer mode=model`: benchmark/manual experiment only, not normal routing;
@@ -63,7 +63,7 @@ The first Apple-Silicon Mac model-value run with Ollama + `qwen3.5:4b` establish
 - bounded failure grouping, likely-cause synthesis, and next checks: local-model triage when available;
 - ambiguous debugging, architecture, trade-offs, patch design, and subtle review remain caller/frontier-model work.
 
-On the first corpus, repo-explorer local synthesis improved mean quality only from 0.95 to 0.9833 (+3.33 pp) while increasing median latency from 0.241 s to 9.523 s (~39.5x) and median result size by 33.9%. Triage improved mean quality from 0.60 to 0.95 (+35 pp), with ~4.93 s median local-model latency. These are initial measurements, not universal constants; routing changes require new evidence.
+Repo-explorer local synthesis improved mean quality only from 0.95 to 0.9833 (+3.33 pp) while increasing median latency from 0.241 s to 9.523 s (~39.5x) and median result size by 33.9%, so normal repo exploration stays deterministic. The follow-up triage stability study covered 20 failure categories × 3 repeats (60 local-model calls): deterministic mean quality 0.6375, local-model mean quality 0.9167 (+27.92 pp), 60/60 successful model calls, 20/20 stable cases, 19/20 cases above the 0.75 quality floor, and 0 regressions. Median local-model triage latency was 5.255 s and p95 was 7.315 s. This freezes bounded local triage synthesis as part of the Mac reference profile; routing changes require new evidence.
 
 ## Interfaces
 
