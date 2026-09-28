@@ -35,12 +35,24 @@ uv run gremlins repo-search RetryExhaustedError --repository /path/to/repo
 uv run gremlins code-read src/example.py --repository /path/to/repo --start-line 1 --line-count 80
 uv run gremlins git-history --repository /path/to/repo --path src/example.py
 
+uv run gremlins evidence-pack \
+  "Find the implementation, tests, and recent changes for retry handling" \
+  --repository /path/to/repo
+
 uv run gremlins repo-explore \
   "Find retry handling" \
   --repository /path/to/repo \
   --term RetryExhaustedError \
   --mode auto
 ```
+
+## Evidence pack contract
+
+`evidence-pack` / MCP `evidence_pack` is the deterministic multi-hop evidence interface. It can perform bounded broad/fuzzy literal discovery, rank relevant files, attach hit-centered excerpts, map test/source relationships, and include bounded Git history.
+
+It does **not** claim a root cause, choose an architecture, design a patch, or call a model. Those judgments remain with the caller.
+
+The capability is intentionally repeatable. A reasoning caller can ask one evidence question, reason over the returned evidence, then issue another narrower request with explicit terms, symbols, or focused paths.
 
 ## MCP
 
