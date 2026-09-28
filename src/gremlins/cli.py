@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -53,18 +54,18 @@ def _write_wrapper(profile: str = "mac-local") -> Path:
     return wrapper
 
 
-def _install_client_skill() -> dict:
+def _install_client_skill(client: str) -> dict:
     source = project_root() / "skills" / "gremlins-delegation" / "SKILL.md"
-    destinations = [
-        Path("~/.claude/skills/gremlins-delegation/SKILL.md").expanduser(),
-        Path("~/.codex/skills/gremlins-delegation/SKILL.md").expanduser(),
-    ]
-    written = []
-    for destination in destinations:
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
-        written.append(str(destination))
-    return {"installed": written}
+    destinations = {
+        "claude": Path("~/.claude/skills/gremlins-delegation/SKILL.md").expanduser(),
+        "codex": Path("~/.codex/skills/gremlins-delegation/SKILL.md").expanduser(),
+    }
+    if client not in destinations:
+        raise ValueError(f"unsupported client: {client}")
+    destination = destinations[client]
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
+    return {"client": client, "installed": [str(destination)]}
 
 
 def _configure_claude(wrapper: Path) -> dict:
@@ -83,77 +84,223 @@ def _configure_codex(wrapper: Path) -> dict:
     return {"available": True, "configured": proc.returncode == 0, "stderr": proc.stderr.strip()[-1000:]}
 
 
+def _configure_client(client: str, wrapper: Path) -> dict:
+    if client == "claude":
+        return _configure_claude(wrapper)
+    if client == "codex":
+        return _configure_codex(wrapper)
+    raise ValueError(f"unsupported client: {client}")
+
+
 def _ensure_model(pull: bool, profile: str = "mac-local") -> dict:
     config = load_config(profile=profile)
     if not shutil.which("ollama"):
-        return {"ok": False, "reason": "ollama not found"}
+        return {"ok": False, "available": False, "reason": "ollama not found"}
     try:
         state = health(config)
-    except ProviderError:
-        state = {"ok": False, "model_present": False}
+    except ProviderError as exc:
+        state = {"ok": False, "model_present": False, "error": str(exc)}
     if state.get("model_present"):
-        return {"ok": True, "model": config.provider.model, "pulled": False}
+        return {"ok": True, "available": True, "model": config.provider.model, "pulled": False}
     if not pull:
-        return {"ok": False, "model": config.provider.model, "reason": "model missing"}
-    proc = subprocess.run(["ollama", "pull", config.provider.model])
-    return {"ok": proc.returncode == 0, "model": config.provider.model, "pulled": proc.returncode == 0}
+        return {
+            "ok": False,
+            "available": True,
+            "model": config.provider.model,
+            "reason": "model missing or provider unavailable",
+            "provider": state,
+        }
+    proc = subprocess.run(["ollama", "pull", config.provider.model], check=False)
+    return {
+        "ok": proc.returncode == 0,
+        "available": True,
+        "model": config.provider.model,
+        "pulled": proc.returncode == 0,
+    }
 
 
-def deploy(args: argparse.Namespace) -> int:
-    if args.profile != "mac-local":
-        print(json.dumps({"error": f"profile not implemented yet: {args.profile}"}, indent=2), file=sys.stderr)
+def _core_setup(profile: str) -> dict:
+    config = load_config(profile=profile)
+    git = shutil.which("git")
+    if not git:
+        return {
+            "ok": False,
+            "profile": profile,
+            "reason": "git not found",
+            "platform": f"{platform.system().lower()}-{platform.machine().lower()}",
+        }
+    lock = write_stack_lock(config)
+    return {
+        "ok": True,
+        "profile": profile,
+        "platform": f"{platform.system().lower()}-{platform.machine().lower()}",
+        "python": sys.version.split()[0],
+        "git": git,
+        "ripgrep": shutil.which("rg"),
+        "stack_lock": str(lock),
+    }
+
+
+def setup(args: argparse.Namespace) -> int:
+    result = {"core": _core_setup(args.profile)}
+    print(json.dumps(result, indent=2))
+    return 0 if result["core"].get("ok") else 2
+
+
+def provider_setup(args: argparse.Namespace) -> int:
+    if args.provider != "ollama":
+        print(json.dumps({"error": f"unsupported provider: {args.provider}"}, indent=2), file=sys.stderr)
+        return 4
+    result = {"provider": args.provider, **_ensure_model(args.pull, args.profile)}
+    print(json.dumps(result, indent=2))
+    return 0 if result.get("ok") else 2
+
+
+def adapter_install(args: argparse.Namespace) -> int:
+    if args.adapter != "mcp":
+        print(json.dumps({"error": f"unsupported adapter: {args.adapter}"}, indent=2), file=sys.stderr)
         return 4
     wrapper = _write_wrapper(args.profile)
-    model = _ensure_model(args.pull_model, args.profile)
-    client_skill = _install_client_skill()
-    claude = _configure_claude(wrapper) if not args.no_clients else {"skipped": True}
-    codex = _configure_codex(wrapper) if not args.no_clients else {"skipped": True}
-    result = {
+    print(json.dumps({
+        "adapter": "mcp",
+        "installed": True,
         "wrapper": str(wrapper),
-        "platform": f"{platform.system().lower()}-{platform.machine().lower()}",
-        "model": model,
-        "client_skill": client_skill,
-        "claude": claude,
-        "codex": codex,
-    }
-    if model.get("ok"):
-        result["stack_lock"] = str(write_stack_lock(load_config(profile=args.profile)))
-    print(json.dumps(result, indent=2))
-    if not model.get("ok"):
-        print("\nGremlins installed, but Ollama/model is not ready. Run: ollama serve   then: gremlins deploy --pull-model", file=sys.stderr)
-        return 2
-    if not args.no_clients and not any(x.get("configured") for x in (claude, codex)):
-        print("\nGremlins is healthy but no coding client was configured automatically.", file=sys.stderr)
-        return 3
+        "profile": args.profile,
+    }, indent=2))
     return 0
 
 
+def adapter_configure(args: argparse.Namespace) -> int:
+    wrapper = _wrapper_path()
+    if not wrapper.exists():
+        wrapper = _write_wrapper(args.profile)
+    skill = _install_client_skill(args.client)
+    state = _configure_client(args.client, wrapper)
+    result = {
+        "client": args.client,
+        "adapter": "mcp",
+        "wrapper": str(wrapper),
+        "skill": skill,
+        **state,
+    }
+    print(json.dumps(result, indent=2))
+    return 0 if state.get("configured") else 2
+
+
+def deploy(args: argparse.Namespace) -> int:
+    """Compatibility umbrella. Optional integrations run only when explicitly requested."""
+    result: dict[str, object] = {
+        "deprecated": True,
+        "message": "Use 'gremlins setup', 'gremlins provider setup ...', and 'gremlins adapter ...' for explicit setup.",
+        "core": _core_setup(args.profile),
+    }
+    if not result["core"].get("ok"):
+        print(json.dumps(result, indent=2))
+        return 2
+
+    failed = False
+    if args.pull_model:
+        model = _ensure_model(True, args.profile)
+        result["provider"] = model
+        failed = failed or not model.get("ok")
+
+    clients: dict[str, object] = {}
+    if not args.no_clients:
+        for client in args.client:
+            wrapper = _wrapper_path()
+            if not wrapper.exists():
+                wrapper = _write_wrapper(args.profile)
+            skill = _install_client_skill(client)
+            state = _configure_client(client, wrapper)
+            clients[client] = {"skill": skill, **state}
+            failed = failed or not state.get("configured")
+    if clients:
+        result["clients"] = clients
+
+    print(json.dumps(result, indent=2))
+    return 2 if failed else 0
+
+
 def doctor(_: argparse.Namespace) -> int:
-    config = load_config()
-    checks: dict[str, object] = {
+    try:
+        config = load_config()
+    except Exception as exc:
+        print(json.dumps({
+            "ok": False,
+            "core": {"ok": False, "error": str(exc)},
+            "providers": {},
+            "interfaces": {},
+            "clients": {},
+        }, indent=2))
+        return 2
+
+    git = shutil.which("git")
+    core_ok = bool(git)
+    core = {
+        "ok": core_ok,
         "python": sys.version.split()[0],
         "platform": f"{platform.system()} {platform.machine()}",
-        "git": shutil.which("git"),
-        "rg": shutil.which("rg"),
-        "ollama": shutil.which("ollama"),
-        "claude": shutil.which("claude"),
-        "codex": shutil.which("codex"),
+        "git": git,
+        "ripgrep": {
+            "available": bool(shutil.which("rg")),
+            "required": False,
+            "fallback": "git-backed portable literal search",
+        },
         "config": str(project_root() / "gremlins.toml"),
-        "wrapper": str(_wrapper_path()) if _wrapper_path().exists() else None,
+        "profile": config.profile,
         "stack_lock": str(stack_lock_path()) if stack_lock_path().exists() else None,
     }
-    try:
-        checks["provider"] = health(config)
-    except ProviderError as exc:
-        checks["provider"] = {"ok": False, "error": str(exc)}
+
+    provider_binary = shutil.which("ollama") if config.provider.kind == "ollama" else None
+    provider: dict[str, object] = {
+        "required": False,
+        "kind": config.provider.kind,
+        "available": bool(provider_binary),
+        "model": config.provider.model,
+    }
+    if provider_binary:
+        try:
+            provider["health"] = health(config)
+        except ProviderError as exc:
+            provider["health"] = {"ok": False, "error": str(exc)}
+    else:
+        provider["health"] = {"ok": False, "status": "unavailable"}
 
     wrapper = _wrapper_path()
-    checks["mcp"] = check_wrapper(wrapper) if wrapper.exists() else check_python_module(profile=config.profile)
+    mcp_available = importlib.util.find_spec("mcp") is not None
+    mcp_state: dict[str, object] = {
+        "required": False,
+        "available": mcp_available,
+        "configured": wrapper.exists(),
+        "wrapper": str(wrapper) if wrapper.exists() else None,
+    }
+    if wrapper.exists():
+        mcp_state["health"] = check_wrapper(wrapper)
 
-    provider_ok = isinstance(checks["provider"], dict) and bool(checks["provider"].get("model_present"))
-    mcp_ok = isinstance(checks["mcp"], dict) and bool(checks["mcp"].get("ok"))
+    clients = {
+        "claude": {"required": False, "available": bool(shutil.which("claude"))},
+        "codex": {"required": False, "available": bool(shutil.which("codex"))},
+    }
+    capabilities = {
+        "repo-explore-deterministic": {"available": core_ok, "requires_model": False},
+        "repo-search-literal": {"available": core_ok, "requires_model": False},
+        "code-read": {"available": core_ok, "requires_model": False},
+        "git-history": {"available": core_ok, "requires_model": False},
+    }
+
+    checks = {
+        "ok": core_ok,
+        "core": core,
+        "capabilities": capabilities,
+        "providers": {config.provider.kind: provider},
+        "interfaces": {
+            "cli": {"required": True, "available": True, "ok": True},
+            "mcp": mcp_state,
+        },
+        "clients": clients,
+    }
     print(json.dumps(checks, indent=2))
-    return 0 if provider_ok and mcp_ok else 2
+    return 0 if core_ok else 2
 
 
 def run_repo(args: argparse.Namespace) -> int:
@@ -357,13 +504,37 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="gremlins", description="Gremlins local capability runtime")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p = sub.add_parser("deploy", help="Configure the current local runtime and optional client adapters")
+    p = sub.add_parser("setup", help="Bootstrap the deterministic Gremlins core only")
     p.add_argument("--profile", default="mac-local")
-    p.add_argument("--pull-model", action=argparse.BooleanOptionalAction, default=True)
-    p.add_argument("--no-clients", action="store_true")
+    p.set_defaults(func=setup)
+
+    p = sub.add_parser("provider", help="Manage optional local-model providers")
+    provider_sub = p.add_subparsers(dest="provider_command", required=True)
+    pp = provider_sub.add_parser("setup", help="Validate or prepare an optional model provider")
+    pp.add_argument("provider", choices=["ollama"])
+    pp.add_argument("--profile", default="mac-local")
+    pp.add_argument("--pull", action=argparse.BooleanOptionalAction, default=True)
+    pp.set_defaults(func=provider_setup)
+
+    p = sub.add_parser("adapter", help="Manage optional interfaces and client registrations")
+    adapter_sub = p.add_subparsers(dest="adapter_command", required=True)
+    ap = adapter_sub.add_parser("install", help="Install an interface adapter")
+    ap.add_argument("adapter", choices=["mcp"])
+    ap.add_argument("--profile", default="mac-local")
+    ap.set_defaults(func=adapter_install)
+    ap = adapter_sub.add_parser("configure", help="Configure an optional client to use Gremlins")
+    ap.add_argument("client", choices=["claude", "codex"])
+    ap.add_argument("--profile", default="mac-local")
+    ap.set_defaults(func=adapter_configure)
+
+    p = sub.add_parser("deploy", help="Deprecated compatibility umbrella; optional setup is opt-in")
+    p.add_argument("--profile", default="mac-local")
+    p.add_argument("--pull-model", action=argparse.BooleanOptionalAction, default=False)
+    p.add_argument("--client", action="append", choices=["claude", "codex"], default=[])
+    p.add_argument("--no-clients", action="store_true", help=argparse.SUPPRESS)
     p.set_defaults(func=deploy)
 
-    p = sub.add_parser("doctor", help="Check local runtime, optional model provider, and adapters")
+    p = sub.add_parser("doctor", help="Report core health separately from optional providers, adapters, and clients")
     p.set_defaults(func=doctor)
 
     p = sub.add_parser("serve", help="Run the Gremlins MCP server over stdio")

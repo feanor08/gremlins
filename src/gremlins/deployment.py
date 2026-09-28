@@ -32,15 +32,18 @@ def _git_head(root: Path) -> str | None:
 
 
 def _ollama_model_identity(model: str) -> dict:
-    proc = subprocess.run(["ollama", "list"], text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    try:
+        proc = subprocess.run(["ollama", "list"], text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    except FileNotFoundError:
+        return {"name": model, "id": None, "available": False}
     if proc.returncode != 0:
-        return {"name": model, "id": None}
+        return {"name": model, "id": None, "available": True}
     lines = proc.stdout.splitlines()
     for line in lines[1:]:
         parts = line.split()
         if parts and parts[0] == model:
-            return {"name": model, "id": parts[1] if len(parts) > 1 else None}
-    return {"name": model, "id": None}
+            return {"name": model, "id": parts[1] if len(parts) > 1 else None, "available": True}
+    return {"name": model, "id": None, "available": True}
 
 
 def stack_lock_path() -> Path:
