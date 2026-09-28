@@ -96,8 +96,8 @@ def test_evidence_pack_explicit_terms_do_not_broaden_fuzzy_variants(tmp_path: Pa
 
 def test_evidence_pack_is_repeatable_and_model_free(tmp_path: Path):
     repo = _repo(tmp_path)
-    first = evidence_pack(str(repo), "Find provider state.", load_config())
-    second = evidence_pack(str(repo), "Find provider state.", load_config())
+    first = evidence_pack(str(repo), "Find provider state.", _config_for(repo))
+    second = evidence_pack(str(repo), "Find provider state.", _config_for(repo))
     assert first["usage"]["repeatable"] is True
     assert second["usage"]["repeatable"] is True
     assert first["usage"]["local_model_called"] is False
