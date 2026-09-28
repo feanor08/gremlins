@@ -16,6 +16,7 @@ REQUIRED_TOOLS = {
     "repo_search",
     "code_read",
     "git_history",
+    "evidence_pack",
     "repo_explorer",
     "failure_triage",
 }
