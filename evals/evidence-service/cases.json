@@ -1,0 +1,83 @@
+[
+  {
+    "id": "evidence-001",
+    "family": "broad-discovery",
+    "task": "Find where provider busy and provider unavailable states become public worker statuses.",
+    "expected_paths": [
+      "src/gremlins/provider.py",
+      "src/gremlins/workers.py"
+    ]
+  },
+  {
+    "id": "evidence-002",
+    "family": "history",
+    "task": "Find why needs-caller replaced needs-frontier and show relevant change history.",
+    "expected_paths": [
+      "src/gremlins/workers.py"
+    ],
+    "expect_history": true
+  },
+  {
+    "id": "evidence-003",
+    "family": "benchmark-validation",
+    "task": "Trace how benchmark arm C verifies exactly one tagged Gremlins treatment call.",
+    "expected_paths": [
+      "src/gremlins/frontier_runner.py",
+      "src/gremlins/benchmark.py"
+    ]
+  },
+  {
+    "id": "evidence-004",
+    "family": "measurement-flow",
+    "task": "Investigate where measurement tags are created, recorded, and queried for benchmark validation.",
+    "expected_paths": [
+      "src/gremlins/metrics.py",
+      "src/gremlins/benchmark.py"
+    ]
+  },
+  {
+    "id": "evidence-005",
+    "family": "adapter-discovery",
+    "task": "Gather evidence for adding an HTTP adapter without changing capability semantics.",
+    "expected_paths": [
+      "docs/INTERFACES.md",
+      "src/gremlins/server.py"
+    ]
+  },
+  {
+    "id": "evidence-006",
+    "family": "security",
+    "task": "Find allowed-root security enforcement and the model-value benchmark sandbox authorization.",
+    "expected_paths": [
+      "src/gremlins/security.py",
+      "src/gremlins/model_value_benchmark.py"
+    ]
+  },
+  {
+    "id": "evidence-007",
+    "family": "test-source",
+    "task": "Map repo explorer deterministic behavior to its tests.",
+    "expected_paths": [
+      "src/gremlins/retrieval.py",
+      "tests/test_retrieval.py"
+    ],
+    "expect_relationship": true
+  },
+  {
+    "id": "evidence-008",
+    "family": "fuzzy-discovery",
+    "task": "Find where the system records whether a local model was called.",
+    "expected_paths": [
+      "src/gremlins/provider.py",
+      "src/gremlins/workers.py"
+    ]
+  },
+  {
+    "id": "evidence-009",
+    "family": "ci",
+    "task": "Trace deterministic CI validation and identify the workflow that runs the capability benchmark.",
+    "expected_paths": [
+      ".github/workflows/ci.yml"
+    ]
+  }
+]
