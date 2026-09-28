@@ -46,7 +46,7 @@ def test_capability_benchmark_passes_without_model(monkeypatch, tmp_path: Path):
     assert report["summary"]["local_model_calls"] == 0
     assert report["requirements"]["ai_client_required"] is False
     assert report["requirements"]["local_model_required"] is False
-    assert report["requirements"]["mcp_required"] is False
+    assert report["requirements"]["mcp_interface_required"] is False
 
     for name in (
         "repo-search",
