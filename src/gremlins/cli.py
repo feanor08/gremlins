@@ -354,16 +354,16 @@ def rollback(_: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="gremlins", description="Gremlins local worker control")
+    parser = argparse.ArgumentParser(prog="gremlins", description="Gremlins local capability runtime")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p = sub.add_parser("deploy", help="Configure the local model and Claude/Codex MCP adapters")
+    p = sub.add_parser("deploy", help="Configure the current local runtime and optional client adapters")
     p.add_argument("--profile", default="mac-local")
     p.add_argument("--pull-model", action=argparse.BooleanOptionalAction, default=True)
     p.add_argument("--no-clients", action="store_true")
     p.set_defaults(func=deploy)
 
-    p = sub.add_parser("doctor", help="Check local runtime, model and client prerequisites")
+    p = sub.add_parser("doctor", help="Check local runtime, optional model provider, and adapters")
     p.set_defaults(func=doctor)
 
     p = sub.add_parser("serve", help="Run the Gremlins MCP server over stdio")
@@ -376,8 +376,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("task")
     p.add_argument("--repository", default=".")
     p.add_argument("--scope", default=".")
-    p.add_argument("--term", action="append", default=None, help="Exact search term selected by the orchestrator; repeatable")
-    p.add_argument("--symbol", action="append", default=None, help="Exact symbol selected by the orchestrator; repeatable")
+    p.add_argument("--term", action="append", default=None, help="Exact search term supplied by the caller; repeatable")
+    p.add_argument("--symbol", action="append", default=None, help="Exact symbol supplied by the caller; repeatable")
     p.add_argument("--mode", choices=["auto", "deterministic", "model"], default="auto")
     p.add_argument("--measurement-tag")
     p.set_defaults(func=run_repo)

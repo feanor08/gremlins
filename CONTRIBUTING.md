@@ -2,7 +2,7 @@
 
 Thanks for helping improve Gremlins.
 
-Gremlins is intentionally conservative: local-first, bounded, read-only by default, and measured against a tuned frontier-only baseline. Contributions should preserve those properties unless a proposal explicitly changes the architecture and includes a concrete security and measurement plan.
+Gremlins is intentionally conservative: local-first, caller-agnostic, bounded, and read-only by default. AI clients are optional integrations, not runtime dependencies. Contributions should preserve those properties unless a proposal explicitly changes the architecture and includes a concrete security and measurement plan.
 
 ## Development setup
 
@@ -23,7 +23,7 @@ If you change dependency metadata, regenerate and commit `uv.lock`.
 Keep changes focused. In the PR description, include:
 
 - what problem the change solves;
-- why the change belongs in Gremlins rather than the frontier orchestrator;
+- why the change belongs in Gremlins core, an interface adapter, or an integration;
 - security implications;
 - evidence/result-size implications;
 - tests added or updated;
@@ -35,8 +35,10 @@ Do not weaken a measurement threshold simply because a change fails it. Diagnose
 
 Please preserve these defaults:
 
-- frontier model remains the orchestrator;
-- deterministic retrieval before inference;
+- core capabilities remain caller-agnostic;
+- CLI/MCP/other interfaces remain adapters over shared capability semantics;
+- deterministic execution before optional inference;
+- local-model providers and AI clients remain optional;
 - no arbitrary shell exposed to the model;
 - no recursive worker delegation;
 - no cloud fallback inside Gremlins;

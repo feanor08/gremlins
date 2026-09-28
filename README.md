@@ -1,111 +1,166 @@
 # Gremlins
 
-**Gremlins is a local-first, read-only evidence layer for coding agents.**
+**Gremlins is a local capability runtime for software-development automation.**
 
-It gives frontier coding assistants such as Claude Code and Codex a small set of bounded MCP tools for repository search, source reading, Git history, and failure triage. The goal is simple: spend expensive frontier context on reasoning, not on mechanical evidence gathering.
+It runs on your machines and exposes bounded, structured capabilities such as repository search, source reading, Git history, failure triage, and optional local-model synthesis.
 
-Gremlins is open source under the MIT License and is intended to stand on its own. It does not depend on a private platform or hosted service.
+Gremlins does **not** require an AI coding agent. A human, shell script, CI job, Python program, MCP client, coding agent, or future HTTP client can all call the same capabilities.
 
-> **Status:** pre-1.0 and actively measured. The current implementation is macOS-first, read-only, and intentionally conservative. Linux, broader packaging, additional clients, and write-capable workflows belong to later phases and should not be treated as shipped today.
+AI agents are clients of Gremlins, not dependencies of Gremlins.
 
-## Why Gremlins?
+> **Status:** pre-1.0. The core read-only capability layer works today. The current installer/deploy path still has some historical coupling to Ollama and Claude/Codex auto-registration; removing that coupling is the next implementation step.
 
-Coding agents are good at reasoning, but they often burn a lot of context on deterministic work:
+## The model
 
-- locating exact symbols and strings;
-- reading small source excerpts;
-- checking bounded Git history;
-- extracting the important parts of failing logs;
-- repeatedly rediscovering the same repository facts.
-
-Gremlins moves that work into a local, bounded layer. It can return deterministic evidence directly, or make one explicitly requested local-model synthesis call when that is genuinely useful.
-
-The frontier model remains the orchestrator.
-
-## What is implemented
-
-Current MCP tools:
-
-- `gremlins_status` — runtime/model health;
-- `repo_search` — exact read-only repository search;
-- `code_read` — bounded source excerpts;
-- `git_history` — bounded read-only Git history;
-- `repo_explorer` — ranked multi-term repository evidence;
-- `failure_triage` — bounded local log/test triage.
-
-Important behavior:
-
-- deterministic retrieval comes before inference;
-- `repo_explorer mode=auto` is deterministic and does **not** call a model;
-- `mode=model` explicitly requests local synthesis;
-- local inference defaults to Ollama with `qwen3.5:4b`;
-- MCP transport is stdio;
-- repositories are read-only;
-- no arbitrary shell tool is exposed;
-- workers cannot spawn child agents;
-- no cloud fallback happens inside Gremlins;
-- frontier-facing evidence is capped separately from the internal evidence budget;
-- local job metrics are stored under `~/.local/state/gremlins/`.
-
-## Quick start
-
-### Requirements
-
-For the current supported path:
-
-- macOS;
-- Python 3.11+;
-- Git;
-- `uv` (the installer can bootstrap it);
-- Ollama;
-- Claude Code and/or Codex if you want automatic MCP registration.
-
-Clone the public repository, then:
-
-```bash
-git clone https://github.com/feanor08/gremlins.git
-cd gremlins
-./install.sh
+```text
+                  any caller
+        human / shell / CI / program / agent
+                       |
+          +------------+------------+
+          |            |            |
+         CLI          MCP      future HTTP/API
+          |            |            |
+          +------------+------------+
+                       |
+                 Gremlins Core
+                       |
+       +---------------+---------------+
+       |               |               |
+   retrieval        workers         policy
+       |               |               |
+       +---------------+---------------+
+                       |
+              structured result
+                       |
+              optional local model
 ```
 
-The installer creates a local virtual environment, prepares Ollama when possible, pulls the configured model, installs the Gremlins delegation skill, creates `~/.local/bin/gremlins-mcp`, and registers that MCP server with supported local clients.
+The caller decides what to do with the result. Gremlins does not need to know whether that caller is Claude Code, Codex, a human, CI, or another program.
 
-Verify:
+## What Gremlins does
+
+Current capabilities include:
+
+- exact read-only repository search;
+- bounded source excerpts;
+- bounded Git history;
+- ranked multi-term repository exploration;
+- failure/log triage;
+- path and repository security checks;
+- structured evidence/results;
+- local job metrics;
+- optional local-model synthesis.
+
+The local model is **optional to the architecture**. Deterministic capabilities should work without inference whenever inference is unnecessary.
+
+## Interfaces
+
+### CLI — first-class interface
+
+Gremlins capabilities are directly callable from the terminal or another process:
 
 ```bash
-.venv/bin/gremlins doctor
-claude mcp list   # if Claude Code is installed
-codex mcp list    # if Codex is installed
-```
-
-## Direct use
-
-```bash
-# Deterministic repository exploration
-.venv/bin/agentctl repo-explore \
+uv run gremlins repo-explore \
   "Find references to RetryExhaustedError" \
   --repository /path/to/repo \
   --term RetryExhaustedError \
   --mode auto
-
-# Log triage
-cat failing.log | .venv/bin/agentctl triage
-
-# Smoke evaluations
-.venv/bin/agentctl eval
 ```
+
+Log triage can also be called directly:
+
+```bash
+cat failing.log | uv run gremlins triage
+```
+
+CLI output is structured JSON, so shell scripts, CI, and programs can consume it.
+
+### MCP — optional adapter
+
+Gremlins also exposes the same local capabilities over MCP for compatible clients.
+
+Claude Code and Codex are currently supported integrations, but they are not the Gremlins runtime and are not required for direct CLI use.
+
+### Future adapters
+
+The same capability contracts should be exposable through additional adapters, for example:
+
+- HTTP/JSON;
+- Python library/API;
+- Android bindings;
+- other MCP clients.
+
+Adapters must not redefine the underlying capability semantics.
+
+## Core design rules
+
+1. **Gremlins is caller-agnostic.**
+2. **CLI, MCP, and future APIs are adapters over the same core capabilities.**
+3. **Deterministic execution happens before optional model inference.**
+4. **Local inference is optional and explicitly requested where useful.**
+5. **No cloud model fallback occurs inside Gremlins.**
+6. **Repository access is read-only by default.**
+7. **No arbitrary shell execution is exposed as a Gremlins capability.**
+8. **Every operation has bounded inputs, evidence, output, time, and permissions.**
+9. **Missing evidence is a valid structured result.**
+10. **Client-specific integrations never become the source of truth for the core runtime.**
+
+## Quick start
+
+### Core development setup
+
+Requirements for the current codebase:
+
+- macOS or Linux;
+- Python 3.11+;
+- Git;
+- `uv`.
+
+```bash
+git clone https://github.com/feanor08/gremlins.git
+cd gremlins
+uv sync --locked
+```
+
+Run deterministic validation:
+
+```bash
+uv run pytest -q
+uv run gremlins eval
+uv run gremlins benchmark pilot-local --repository .
+```
+
+Run a capability directly:
+
+```bash
+uv run gremlins repo-explore \
+  "Find the provider configuration" \
+  --repository . \
+  --term ProviderConfig \
+  --mode auto
+```
+
+### Current convenience installer
+
+`./install.sh` is still the original Mac-oriented convenience path. Today it prepares Ollama and attempts Claude/Codex integration.
+
+That is a **current implementation limitation**, not the intended dependency model. The next packaging work will split:
+
+- core install;
+- optional local-model provider setup;
+- optional client adapter registration.
 
 ## Configuration
 
 Canonical defaults live in `gremlins.toml`. Machine-specific additions live in `profiles/`.
 
-By default, Gremlins allows read-only access to Git repositories under the current user's home directory and denies common credential locations such as SSH, AWS, GPG, cloud credentials, and macOS Keychains. Extra repository roots are opt-in: add them to the local profile you use.
+By default, Gremlins confines repository access to approved roots and denies common credential locations such as SSH, AWS, GPG, cloud credentials, and macOS Keychains.
 
-The local-model input budget and the smaller frontier-facing result budget are intentionally separate.
+Extra roots are explicit deployment/profile configuration.
 
 ## Security model
 
-The security boundary is enforced in code, not only by prompts.
+The security boundary is enforced by the runtime and capability contracts, not by caller prompts.
 
 Gremlins currently exposes:
 
@@ -120,91 +175,89 @@ Gremlins currently exposes:
 
 See [docs/SECURITY.md](docs/SECURITY.md) and [SECURITY.md](SECURITY.md).
 
-## Design rules
+## Architecture
 
-1. The frontier model remains the orchestrator.
-2. Retrieval is deterministic before inference.
-3. Workers receive a task plus bounded evidence, not the parent conversation.
-4. Workers cannot recursively delegate.
-5. Read-only behavior is enforced by the runtime.
-6. Missing evidence is a valid result.
-7. Local-model failure never silently escalates to a cloud model.
-8. A Gremlins call should replace frontier work, not merely add another hop.
+The canonical architecture is [architecture.md](architecture.md).
 
-The detailed design and implementation plan lives in [architecture.md](architecture.md).
+The central abstraction is:
 
-## Measurement first
-
-Gremlins is deliberately gated on evidence that it actually reduces frontier work.
-
-The repository includes a controlled B/C benchmark:
-
-- **B** — tuned frontier-only workflow;
-- **C** — Gremlins-assisted workflow.
-
-The default gate requires, among other things:
-
-- at least 10 paired B/C runs;
-- at least 10 unique cases;
-- at least 30% reduction in frontier processed tokens;
-- no more than a 5 percentage-point acceptance drop;
-- bounded redo/re-verification;
-- no more than a 20% elapsed-time increase.
-
-Run the deterministic corpus first:
-
-```bash
-.venv/bin/agentctl benchmark pilot-local --repository .
+```text
+caller
+  -> adapter
+  -> capability contract
+  -> Gremlins runtime
+  -> deterministic implementation / optional local worker
+  -> structured result
 ```
 
-Then run a controlled frontier study:
+See [docs/INTERFACES.md](docs/INTERFACES.md) for the caller/interface boundary.
 
-```bash
-.venv/bin/agentctl benchmark suite \
-  --study pilot-claude \
-  --repository . \
-  --client claude \
-  --repeats 2
+## Measurement
+
+Gremlins should be useful independently of any particular AI agent.
+
+Agent-based frontier benchmarks are therefore **integration experiments**, not runtime requirements. They answer questions such as:
+
+> When a coding agent uses Gremlins, does it perform the same task with less expensive frontier work?
+
+The existing B/C benchmark harness supports Claude/Codex studies for that purpose.
+
+The product itself should also be measured at the capability layer:
+
+- correctness;
+- recall/coverage;
+- result size;
+- latency;
+- local resource use;
+- deterministic-vs-model value;
+- client-independent contract stability.
+
+See [docs/MEASUREMENT.md](docs/MEASUREMENT.md).
+
+## Optional AI integrations
+
+Current integrations can register Gremlins with Claude Code and Codex through MCP.
+
+Those integrations are convenience adapters only:
+
+```text
+Claude Code ----\
+Codex -----------+--> MCP adapter --> Gremlins Core
+other MCP client/
 ```
 
-Inspect it:
-
-```bash
-.venv/bin/agentctl benchmark report --study pilot-claude
-.venv/bin/agentctl benchmark gate --study pilot-claude
-```
-
-See [docs/MEASUREMENT.md](docs/MEASUREMENT.md) for the protocol and fairness rules.
+Gremlins must remain usable when none of them is installed.
 
 ## Roadmap
 
-The architecture is intentionally broader than the shipped implementation. Likely future work includes:
+Near-term architectural work:
 
-- stronger cross-platform installation;
-- Linux/home-server profiles;
-- a portable worker/skill registry;
-- more local providers and model classes;
-- richer observability and measurement;
-- optional write-capable workers behind a separate permission and sandbox model;
-- additional client integrations.
+- decouple core installation from Ollama and client registration;
+- make direct capability execution the primary product surface;
+- formalize stable input/output contracts;
+- make local-model providers optional plugins/adapters;
+- separate client integrations from core runtime packages;
+- generalize agent-specific status/terminology such as `needs-frontier`;
+- add stronger Linux packaging;
+- add HTTP/library adapters only when there is a concrete use case;
+- continue measurement at both capability and client-integration layers.
 
-Those are roadmap items, not promises or current capabilities.
+Longer-term work may include multi-node capability routing, Android providers, richer worker registries, and separately secured write-capable operations.
 
 ## Contributing
 
 Contributions are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md).
 
-For most changes:
+For most core changes:
 
 ```bash
 uv sync --locked
 uv run pytest -q
-uv run gremlins mcp-smoke
 uv run gremlins eval
 uv run gremlins benchmark pilot-local --repository .
 ```
 
-Please preserve the project's core constraints: bounded evidence, read-only defaults, no hidden cloud escalation, and measurement before architectural expansion.
+Please preserve caller independence, bounded execution, read-only defaults, and explicit separation between core runtime and optional integrations.
 
 ## License
 

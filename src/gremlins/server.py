@@ -72,7 +72,7 @@ def repo_explorer(
     mode: str = "auto",
     measurement_tag: str | None = None,
 ) -> dict:
-    """Bounded read-only repo worker. Supply terms/symbols when the orchestrator knows exact targets. mode=auto is deterministic and never calls a model; mode=model explicitly requests local synthesis. Deterministic results are ranked exact hits with compact hit-centered context. When coverage says all_returned=true for a term, Gremlins returned every exact match it found for that term, so do not repeat the same broad search unless more context is genuinely needed."""
+    """Bounded read-only repo worker. Supply terms/symbols when the caller knows exact targets. mode=auto is deterministic and never calls a model; mode=model explicitly requests local synthesis. Deterministic results are ranked exact hits with compact hit-centered context. When coverage says all_returned=true for a term, Gremlins returned every exact match it found for that term, so do not repeat the same broad search unless more context is genuinely needed."""
     return repo_explore(
         repository,
         task,

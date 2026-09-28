@@ -1,10 +1,31 @@
-# Gremlins measurement gate
+# Gremlins measurement
 
-The product question is not "does the local model answer?"
+Gremlins is caller-independent, so measurement has two layers.
 
-It is:
+## Capability-layer measurement
 
-> Does the same developer task finish correctly with less frontier work than a well-tuned frontier-only workflow?
+This is the product-level baseline and does not require an AI agent.
+
+Measure:
+
+- correctness and evidence coverage;
+- deterministic recall;
+- result size;
+- latency;
+- memory/CPU pressure;
+- security/path-policy behavior;
+- contract stability;
+- whether optional local inference adds value over deterministic execution.
+
+## Client-integration measurement
+
+The existing A/B/C harness is an integration experiment for frontier coding agents.
+
+Its question is:
+
+> When a coding agent uses Gremlins, does the same developer task finish correctly with less frontier work than a well-tuned agent-only workflow?
+
+Claude/Codex are benchmark clients here, not Gremlins dependencies.
 
 Use three arms for the same case:
 
@@ -55,7 +76,7 @@ agentctl benchmark record \
   --gremlins-result-chars 4200
 ```
 
-Set `--frontier-redid-search` when the frontier orchestrator repeats the same broad retrieval after Gremlins. That is a key failure mode.
+Set `--frontier-redid-search` when the benchmarked frontier client repeats the same broad retrieval after Gremlins. That is a key integration failure mode.
 
 ## Cost-weighted comparison
 

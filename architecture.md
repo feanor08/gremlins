@@ -1,12 +1,14 @@
-# Gremlins — Final Architecture and Implementation Plan
+# Gremlins — Agent-Independent Local Capability Runtime
 
-Gremlins is a local-first delegation and capability layer for coding agents.
+Gremlins is a local-first capability runtime for software-development automation.
 
 Its job is simple:
 
-> Keep Claude Code, Codex, and other frontier agents focused on difficult reasoning while moving mechanical, repetitive, evidence-gathering work to deterministic tools and bounded local workers.
+> Expose bounded, secure, reusable operations on the machines where the work and evidence live, through stable contracts that any caller can invoke.
 
-The system is designed to start on one Apple Silicon Mac, then expand to other Macs, Linux machines and home servers, future GPU nodes, and Android devices without changing how the orchestrating coding agent asks for work.
+A caller may be a human, shell script, CI job, Python program, MCP client, coding agent, or future HTTP client. Gremlins does not require the caller to be an AI system.
+
+The system is designed to start on one machine, then expand to other Macs, Linux machines and home servers, future GPU nodes, and Android devices without changing the meaning of its capabilities.
 
 This document is the canonical architecture and implementation plan for the project.
 
@@ -14,29 +16,28 @@ This document is the canonical architecture and implementation plan for the proj
 
 # 1. Why Gremlins exists
 
-The original problem is not merely model cost.
+The original motivation included reducing expensive coding-agent context, but the deeper product is broader: **local capabilities should be reusable independently of whoever calls them**.
 
-The deeper problem is **context multiplication**.
-
-A frontier coding agent may have a very large working context and then delegate repository search, log inspection, Git history, test analysis, documentation extraction, or other mechanical work to additional agents. If every delegated task carries too much context or repeatedly rediscovers the same evidence, the total consumption grows dramatically even when the actual work is simple.
+Repository search, bounded file reads, Git history, log extraction, test parsing, device inspection, and similar work should not need to be reimplemented inside every agent, CI workflow, or automation script.
 
 Gremlins therefore optimizes for:
 
-- low frontier-model context consumption;
-- deterministic evidence gathering before model reasoning;
-- bounded local inference;
-- small task/result contracts;
-- portable skills;
-- reusable workers;
+- caller-independent capability contracts;
+- deterministic execution before optional model reasoning;
+- bounded local inference when inference adds value;
+- small structured input/result contracts;
+- direct CLI/process use;
+- portable skills and workers;
 - replaceable models and tool implementations;
 - reproducible deployment;
 - explicit security boundaries;
 - no uncontrolled recursive delegation;
-- easy migration from one Mac to a Linux/home-server cluster and Android later.
+- easy migration from one Mac to Linux/home-server nodes and Android later;
+- measurable correctness, latency, resource use, and downstream-client benefit.
 
-Gremlins is **not** intended to replace Claude Code or Codex.
+Gremlins is **not an AI agent framework**.
 
-They remain the primary orchestrators.
+AI coding agents can use Gremlins, but so can humans and ordinary software.
 
 ---
 
@@ -44,105 +45,87 @@ They remain the primary orchestrators.
 
 These rules define the project.
 
-1. **The frontier coding agent remains the orchestrator.**
-2. **Deterministic retrieval happens before model inference.**
-3. **A Gremlins worker receives a task plus selected evidence, never the entire parent conversation.**
-4. **Workers do not create child workers by default.**
-5. **Skills contain workflow knowledge, not security enforcement.**
-6. **Security is enforced by the runtime and tool boundary.**
-7. **Every job has explicit input, evidence, output, time, and model budgets.**
-8. **Missing evidence is a valid result.**
-9. **Gremlins never silently falls back to a cloud model.**
-10. **Repository work is read-only until a separate write-capable security architecture is deliberately enabled.**
-11. **Model implementations are replaceable. Workers request model capabilities, not hard-coded model names.**
-12. **Tool implementations are replaceable behind stable capabilities.**
-13. **The same canonical definitions generate Claude, Codex, and future client integrations.**
-14. **Deployment state is reproducible and auditable.**
-15. **Every optimization must be measurable against frontier-token consumption and completion quality.**
+1. **Gremlins is caller-agnostic.**
+2. **CLI, MCP, and future APIs are adapters over the same core capabilities.**
+3. **Deterministic execution happens before optional model inference.**
+4. **Local model inference is optional and explicit.**
+5. **A worker receives a task plus selected evidence, never an entire unrelated parent conversation.**
+6. **Workers do not recursively create child workers by default.**
+7. **Skills contain workflow knowledge, not security enforcement.**
+8. **Security is enforced by the runtime and capability boundary.**
+9. **Every operation has explicit input, evidence, output, time, permission, and optional-model budgets.**
+10. **Missing evidence is a valid structured result.**
+11. **Gremlins never silently falls back to a cloud model.**
+12. **Repository work is read-only until a separate write-capable security architecture is deliberately enabled.**
+13. **Model implementations are replaceable behind model capabilities.**
+14. **Tool implementations are replaceable behind stable capabilities.**
+15. **Client-specific configuration is generated adapter output, never canonical source of truth.**
+16. **Deployment state is reproducible and auditable.**
+17. **Optimizations must be measured at the capability layer; client-specific savings are integration measurements, not product identity.**
 
 ---
 
 # 3. Final system architecture
 
 ```text
-                         FRONTIER ORCHESTRATORS
-                 Claude Code / Codex / future clients
-                                  |
-                                  |
-                         small task + scope
-                                  |
-                                  v
-                    +--------------------------+
-                    |      GREMLINS GATEWAY    |
-                    |       MCP boundary       |
-                    +--------------------------+
-                                  |
-              +-------------------+-------------------+
-              |                   |                   |
-              v                   v                   v
-        capability          policy/budget       job controller
-         resolver              engine              + queue
-              |                   |                   |
-              +-------------------+-------------------+
-                                  |
-                                  v
-                    +--------------------------+
-                    |   DETERMINISTIC TOOLING  |
-                    |--------------------------|
-                    | exact search             |
-                    | bounded file reads       |
-                    | Git history              |
-                    | test/log parsers         |
-                    | symbol/index lookup      |
-                    | device-specific tools    |
-                    +--------------------------+
-                                  |
-                           evidence packet
-                                  |
-                   +--------------+--------------+
-                   |                             |
-                   | inference unnecessary       | inference useful
-                   v                             v
-              return evidence             WORKER RUNTIME
-                                           |
-                                           +-- worker instructions
-                                           +-- selected skills
-                                           +-- capability-bound tools
-                                           +-- model-class request
-                                           +-- explicit budgets
-                                           |
-                                           v
-                                  MODEL PROVIDER RESOLVER
-                                           |
-                +--------------------------+--------------------------+
-                |                          |                          |
-                v                          v                          v
-          Mac local model            Linux model node            future GPU node
-          Ollama / MLX /             Ollama / llama.cpp /      vLLM / other
-          llama.cpp                  other runtime
-                |                          |                          |
-                +--------------------------+--------------------------+
-                                           |
-                                     structured result
-                                           |
-                                           v
-                                  CONTRACT VALIDATION
-                                           |
-                                  evidence validation
-                                           |
-                                           v
-                                  compact MCP result
-                                           |
-                                           v
-                                   Claude / Codex
+                        CALLERS
+      human / shell / CI / program / coding agent
+                           |
+             +-------------+-------------+
+             |             |             |
+            CLI           MCP       future HTTP/API
+             |             |             |
+             +-------------+-------------+
+                           |
+                           v
+                 +---------------------+
+                 |   GREMLINS CORE     |
+                 | capability runtime  |
+                 +---------------------+
+                           |
+          +----------------+----------------+
+          |                |                |
+          v                v                v
+     capability       policy/budget     job controller
+      resolver           engine            + queue
+          |                |                |
+          +----------------+----------------+
+                           |
+                           v
+                 DETERMINISTIC TOOLING
+          search / reads / Git / parsers / devices
+                           |
+                       evidence
+                           |
+                +----------+----------+
+                |                     |
+          inference not needed   inference useful
+                |                     |
+                v                     v
+        structured result        WORKER RUNTIME
+                                      |
+                               optional model class
+                                      |
+                               provider resolver
+                                      |
+                       local/private model provider
+                                      |
+                               structured result
+                |                     |
+                +----------+----------+
+                           |
+                    CONTRACT VALIDATION
+                           |
+                           v
+                    structured result
+                           |
+                           v
+                        CALLER
 ```
 
-Android joins the same architecture as either:
+MCP is one adapter, not the architecture boundary. Claude Code and Codex are optional MCP clients. The CLI is equally valid, and future adapters must preserve the same capability semantics.
 
-- a device/tool capability provider; or
-- a small inference provider.
-
-It does not require a separate orchestration model.
+Android can participate as a device/tool capability provider, a caller, or an optional inference provider. It does not require a separate orchestration model.
 
 ---
 
@@ -374,24 +357,27 @@ The worker does not care which node ultimately executes the model.
 
 ---
 
-## 4.8 Client adapter
+## 4.8 Interface adapter
 
-A client adapter makes the canonical Gremlins definitions usable by another coding agent.
+An interface adapter exposes canonical Gremlins capabilities to a caller without redefining their meaning.
 
-Initial adapters:
+Current interfaces:
 
-- Claude Code;
-- Codex.
+- CLI/direct process invocation;
+- MCP over stdio.
+
+Current optional MCP client integrations include Claude Code and Codex.
 
 Future adapters may include:
 
-- OpenCode;
-- Goose;
-- another MCP client.
+- HTTP/JSON;
+- a Python library API;
+- Android bindings;
+- other MCP clients.
 
 Client-specific configuration is generated deployment output.
 
-It is not the canonical source of truth.
+It is never the canonical source of truth, and Gremlins must remain usable when no AI client is installed.
 
 ---
 
@@ -411,16 +397,18 @@ A useful result contract includes:
 - usage;
 - next queries/checks where appropriate.
 
-Possible job status values include:
+Possible job status values should be caller-neutral:
 
 ```text
 complete
 partial
-needs-frontier
+needs-caller
 busy
 failed
 cancelled
 ```
+
+The current implementation still exposes the legacy name `needs-frontier`. That is compatibility debt from the coding-agent-first prototype and should migrate to caller-neutral terminology without changing the underlying escalation semantics.
 
 A structured schema alone is not enough.
 
@@ -475,13 +463,17 @@ The data plane handles actual jobs:
 
 ---
 
-# 6. MCP is the external interoperability boundary
+# 6. Interfaces are adapters over one capability runtime
 
-MCP is the primary interface between coding agents and Gremlins.
+Gremlins capabilities must be directly callable without an AI client.
 
-Claude and Codex should invoke Gremlins directly through MCP.
+The CLI is a first-class interface for humans, shell scripts, CI, and programs. MCP is a first-class interoperability adapter for compatible clients. Future HTTP/library adapters may be added when justified.
 
-The system should not create a frontier subagent merely to call a local worker.
+No interface owns the underlying capability semantics.
+
+Claude Code, Codex, and other coding agents may invoke Gremlins through MCP, but the system must not require them to operate.
+
+An AI client should not need to create another frontier subagent merely to call a local Gremlins capability.
 
 The MCP surface should stay small.
 
@@ -1498,13 +1490,14 @@ Complexity must be earned by a real workload.
 
 # 30. Current implementation
 
-The repository already contains a working Mac-oriented base.
+The repository already contains a working local read-only base.
 
 Implemented now:
 
-- MCP server;
-- Claude Code registration;
-- Codex registration;
+- direct CLI capability invocation;
+- MCP server adapter;
+- optional Claude Code registration;
+- optional Codex registration;
 - canonical `gremlins.toml`;
 - portable `SKILL.md` definitions;
 - deterministic exact repository search;
@@ -1577,9 +1570,10 @@ Make the current small system trustworthy enough to measure.
 - pin dependencies with committed `uv.lock`;
 - strengthen installer idempotency;
 - improve `doctor` so it tests actual MCP invocation rather than only executable presence;
-- add installer recovery if client registration fails;
-- detect unsupported Claude/Codex CLI syntax cleanly;
-- add model warm-up checks;
+- split core install, local-model provider setup, and client-adapter registration;
+- add installer recovery if optional client registration fails;
+- detect unsupported optional client CLI syntax cleanly;
+- add model warm-up checks only for profiles that enable local inference;
 - add explicit cancellation and timeout handling;
 - keep the inference lock in Gremlins state and make its wait policy configurable;
 - validate dirty-repository snapshot reporting;
@@ -1588,10 +1582,12 @@ Make the current small system trustworthy enough to measure.
 
 ### Exit criteria
 
-- one-command Mac install works repeatedly;
+- core installation works without requiring an AI client;
+- local-model setup is optional and separable from core installation;
 - reinstall is safe;
 - uninstall only removes Gremlins-owned configuration;
-- Claude and Codex can both invoke Gremlins;
+- direct CLI capability invocation works independently;
+- optional MCP clients can invoke the same capabilities;
 - tests pass on macOS;
 - returned evidence is bounded tightly enough that a Gremlins call does not recreate a large frontier context;
 - local worker failure never damages a repository;
@@ -1610,9 +1606,9 @@ Implemented measurement infrastructure includes fresh-clone B/C isolation, count
 
 This workstream decides whether the rest of the architecture is worth building.
 
-The central product assumption is not merely that a small local model can produce a summary. It is that the frontier orchestrator can use the returned result **without broadly repeating the same retrieval and reasoning work**.
+One integration assumption is that a frontier coding agent can use a Gremlins result **without broadly repeating the same retrieval and reasoning work**.
 
-That assumption must be measured.
+That assumption must be measured, but it is not the definition of the product. Capability correctness, latency, result size, resource use, and contract stability must also be measurable without any frontier agent.
 
 ### Experiment arms
 
