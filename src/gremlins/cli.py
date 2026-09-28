@@ -18,6 +18,7 @@ from .retrieval import git_history as _git_history, literal_search, read_excerpt
 from .security import resolve_repository
 from .mcpcheck import check_python_module, check_wrapper
 from .capability_benchmark import run_capability_benchmark
+from .model_value_benchmark import run_model_value_benchmark
 from .benchmark import (
     BenchmarkRecord,
     Prices,
@@ -523,6 +524,22 @@ def benchmark_capabilities_cmd(args: argparse.Namespace) -> int:
     return 0 if report["pass"] else 1
 
 
+def benchmark_model_value_cmd(args: argparse.Namespace) -> int:
+    try:
+        report = run_model_value_benchmark(
+            args.repository,
+            worker=args.worker,
+            repo_case_ids=args.repo_case,
+            triage_case_ids=args.triage_case,
+            min_quality_gain=args.min_quality_gain,
+        )
+    except (RuntimeError, ValueError) as exc:
+        print(json.dumps({"benchmark": "model-value-v1", "error": str(exc)}, indent=2), file=sys.stderr)
+        return 2
+    print(json.dumps(report, indent=2))
+    return 0
+
+
 def benchmark_clear_cmd(args: argparse.Namespace) -> int:
     path = study_path(args.study)
     if path.exists():
@@ -723,6 +740,14 @@ def build_parser() -> argparse.ArgumentParser:
     bp = bench.add_parser("capabilities", help="Run the caller-independent capability benchmark")
     bp.add_argument("--repository", default=".")
     bp.set_defaults(func=benchmark_capabilities_cmd)
+
+    bp = bench.add_parser("model-value", help="Compare deterministic execution with optional local-model synthesis")
+    bp.add_argument("--repository", default=".")
+    bp.add_argument("--worker", choices=["all", "repo-explore", "triage"], default="all")
+    bp.add_argument("--repo-case", action="append", help="Run only the selected repo case; repeatable")
+    bp.add_argument("--triage-case", action="append", help="Run only the selected triage case; repeatable")
+    bp.add_argument("--min-quality-gain", type=float, default=0.10)
+    bp.set_defaults(func=benchmark_model_value_cmd)
 
     bp = bench.add_parser("clear", help="Clear a local benchmark study")
     bp.add_argument("--study", default="pilot")
