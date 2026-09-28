@@ -193,6 +193,27 @@ This is intentionally an **offline** analysis. Running it consumes no Claude quo
 1. replacing spawned retrieval agents; and
 2. reducing direct parent-Claude retrieval loops during reasoning-heavy tasks such as RCA.
 
+### Evidence-service gate
+
+The Claude observation study showed that the larger opportunity is direct parent-model retrieval, not only spawned subagents: **128 of 139 root non-Agent tool calls (92.1%) were evidence acquisition**, and eight of ten tasks gathered evidence without spawning any Agent.
+
+The resulting product boundary is:
+
+```text
+caller/frontier model: hypotheses, causal reasoning, architecture, judgment
+Gremlins: search, bounded reads, test/source links, Git/change evidence, compact evidence packs
+```
+
+The deterministic evidence-service gate is:
+
+```bash
+uv run gremlins benchmark evidence-service --repository .
+```
+
+It uses an isolated clone with `evals/` removed and checks observation-derived broad/fuzzy discovery, history evidence, test/source relationships, expected-path coverage, result-size bounds, and **zero local-model calls**. It is part of normal macOS/Linux CI.
+
+The evidence service is intentionally repeatable. A frontier caller may use several `evidence_pack` calls while doing RCA; the caller still owns hypotheses and causal conclusions.
+
 ## Claude/Codex integration gate before THG
 
 THG deployment is intentionally paused until Gremlins is tested with both frontier clients on the Mac reference environment.
