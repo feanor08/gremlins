@@ -40,6 +40,33 @@ This gate is now part of normal macOS and Linux CI.
 
 The capability gate does not answer whether local inference is useful. That is a separate deterministic-vs-model experiment.
 
+## Deterministic vs local-model value measurement
+
+The first real model-value environment is the Apple-Silicon Mac reference deployment.
+
+Bootstrap it explicitly:
+
+```bash
+./scripts/setup_mac_local_model.sh
+```
+
+Then run:
+
+```bash
+uv run gremlins benchmark model-value --repository . --worker all
+```
+
+The benchmark pairs the same tasks against:
+
+- deterministic Gremlins evidence;
+- deterministic evidence plus explicit local-model synthesis.
+
+The repo-explorer arm uses the existing hidden expected paths and claims. The triage arm uses a separate hidden five-case log corpus. The primary signal is mean paired quality gain; result size, latency, prompt tokens, and output tokens are reported so any gain can be judged against its cost.
+
+The configured reference model is currently `qwen3.5:4b` via the optional Ollama provider. That is an experiment implementation, not a Gremlins architectural dependency.
+
+Normal CI remains model-free. The model-value benchmark is manual because it requires a real local model and machine-specific performance is part of what is being measured.
+
 It also does not answer whether Claude, Codex, or another coding client saves frontier work by using Gremlins. That remains the client-integration B/C experiment below.
 
 ## Client-integration measurement
