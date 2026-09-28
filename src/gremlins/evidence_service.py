@@ -93,7 +93,18 @@ def _dedupe(values: Sequence[str], limit: int) -> list[str]:
     return out
 
 
-def _variant_candidates(task: str, base_terms: Sequence[str], limit: int = 18) -> list[str]:
+def _singular_word(word: str) -> str:
+    low = word.lower()
+    if len(low) > 4 and low.endswith("ies"):
+        return low[:-3] + "y"
+    if len(low) > 4 and low.endswith("ses"):
+        return low[:-2]
+    if len(low) > 3 and low.endswith("s") and not low.endswith("ss"):
+        return low[:-1]
+    return low
+
+
+def _variant_candidates(task: str, base_terms: Sequence[str], limit: int = 24) -> list[str]:
     candidates: list[str] = []
     for term in base_terms:
         if " " in term:
@@ -110,14 +121,20 @@ def _variant_candidates(task: str, base_terms: Sequence[str], limit: int = 18) -
         for word in re.findall(r"[A-Za-z][A-Za-z0-9]{2,}", task)
         if word.lower() not in _STOP_WORDS
     ]
-    for width in (2, 3):
-        for index in range(max(0, len(words) - width + 1)):
-            parts = words[index:index + width]
-            if len(parts) != width:
-                continue
-            candidates.extend(["_".join(parts), "-".join(parts), ".".join(parts)])
-            if len(candidates) >= limit * 3:
-                break
+    normalized = [_singular_word(word) for word in words]
+    for word, singular in zip(words, normalized):
+        if singular != word:
+            candidates.append(singular)
+
+    for sequence in (words, normalized):
+        for width in (2, 3):
+            for index in range(max(0, len(sequence) - width + 1)):
+                parts = sequence[index:index + width]
+                if len(parts) != width:
+                    continue
+                candidates.extend(["_".join(parts), "-".join(parts), ".".join(parts)])
+                if len(candidates) >= limit * 4:
+                    break
     return _dedupe(candidates, limit)
 
 
@@ -164,26 +181,84 @@ def _top_paths(
     max_files: int,
     focus_paths: Sequence[str] | None,
 ) -> list[str]:
-    paths: list[str] = []
+    focused: list[str] = []
     for raw in focus_paths or []:
         file = resolve_repo_file(repo, raw)
         rel = str(file.relative_to(repo))
-        if rel not in paths:
-            paths.append(rel)
+        if rel not in focused:
+            focused.append(rel)
 
+    hits_by_path: dict[str, list[Evidence]] = defaultdict(list)
     for item in evidence:
-        if item.path and item.kind in {"search", "file", "path"} and item.path not in paths:
-            paths.append(item.path)
-        if len(paths) >= max_files:
-            return paths[:max_files]
+        if item.path and item.kind == "search":
+            hits_by_path[item.path].append(item)
 
-    if len(paths) < max_files:
-        for item in path_inventory(repo, search_terms, config):
-            if item.path and item.path not in paths:
-                paths.append(item.path)
-            if len(paths) >= max_files:
+    inventory_paths = [
+        item.path for item in path_inventory(repo, search_terms, config)
+        if item.path
+    ]
+    candidates = _dedupe(
+        [*focused, *hits_by_path.keys(), *inventory_paths],
+        80,
+    )
+
+    def path_score(path: str) -> tuple[int, int, int, int, str]:
+        hits = hits_by_path.get(path, [])
+        matched = _search_terms_for_path(path, hits, search_terms)
+        low = path.lower()
+        name = Path(low).name
+        path_term_score = sum(
+            8 if term.lower() in name else 3
+            for term in search_terms
+            if term.lower() in low
+        )
+        return (
+            1 if path in focused else 0,
+            len({term.lower() for term in matched}),
+            path_term_score,
+            min(len(hits), 6),
+            path,
+        )
+
+    ranked = sorted(
+        candidates,
+        key=lambda path: (
+            -path_score(path)[0],
+            -path_score(path)[1],
+            -path_score(path)[2],
+            -path_score(path)[3],
+            len(path),
+            path,
+        ),
+    )
+
+    selected: list[str] = list(focused[:max_files])
+    # Preserve evidence diversity. The observation corpus repeatedly needed
+    # source + tests + docs/config in the same reasoning step; a single role
+    # must not crowd every other class out merely because it mentions more
+    # query words.
+    role_targets = {
+        "source": 5,
+        "test": 1,
+        "documentation": 1,
+        "configuration": 1,
+    }
+    for role, target in role_targets.items():
+        already = sum(_path_role(path) == role for path in selected)
+        for path in ranked:
+            if len(selected) >= max_files or already >= target:
                 break
-    return paths[:max_files]
+            if path in selected or _path_role(path) != role:
+                continue
+            selected.append(path)
+            already += 1
+
+    for path in ranked:
+        if len(selected) >= max_files:
+            break
+        if path not in selected:
+            selected.append(path)
+    return selected[:max_files]
 
 
 def _test_relationships(
@@ -344,31 +419,46 @@ def _compact_pack(result: dict, max_chars: int) -> dict:
 
     while size() > max_chars:
         changed = False
-        topic = result.get("history", {}).get("topic", [])
-        if topic:
+        history = result.get("history", {})
+        topic = history.get("topic", [])
+        by_path = history.get("by_path", [])
+
+        # First reduce duplicate history breadth but preserve at least one
+        # history group when history exists; history is first-class evidence,
+        # not decoration to discard before source excerpts.
+        if len(topic) > 1:
             topic.pop()
             changed = True
-        elif result.get("history", {}).get("by_path"):
-            result["history"]["by_path"].pop()
+        elif len(by_path) > 1:
+            by_path.pop()
             changed = True
         else:
             files = result.get("files", [])
-            for item in reversed(files):
+            # Drop low-ranked excerpts before deleting an entire evidence
+            # category. The top two file excerpts are retained longest.
+            for item in reversed(files[2:]):
                 if item.get("excerpt") is not None:
                     item["excerpt"] = None
                     changed = True
                     break
-            if not changed and result.get("relationships"):
-                result["relationships"].pop()
-                changed = True
             if not changed:
                 for item in reversed(files):
                     if len(item.get("hits") or []) > 1:
                         item["hits"].pop()
                         changed = True
                         break
+            if not changed and len(result.get("relationships") or []) > 1:
+                result["relationships"].pop()
+                changed = True
             if not changed and len(files) > 1:
                 files.pop()
+                changed = True
+            # Only as a last resort may the final history group be removed.
+            if not changed and topic:
+                topic.pop()
+                changed = True
+            if not changed and by_path:
+                by_path.pop()
                 changed = True
 
         if not changed:
