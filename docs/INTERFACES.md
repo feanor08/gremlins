@@ -28,9 +28,13 @@ Properties:
 - can be composed from shell, CI, and programs;
 - uses the same capability implementations as other adapters.
 
-Example:
+Examples:
 
 ```bash
+uv run gremlins repo-search RetryExhaustedError --repository /path/to/repo
+uv run gremlins code-read src/example.py --repository /path/to/repo --start-line 1 --line-count 80
+uv run gremlins git-history --repository /path/to/repo --path src/example.py
+
 uv run gremlins repo-explore \
   "Find retry handling" \
   --repository /path/to/repo \
@@ -70,4 +74,4 @@ gremlins core
   + optional client registration
 ```
 
-The current installer has not fully reached this split yet. That migration is tracked in the canonical architecture.
+The core installer now follows this split: provider setup, MCP installation, and client registration are explicit optional actions.

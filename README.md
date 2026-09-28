@@ -8,7 +8,7 @@ Gremlins does **not** require an AI coding agent. A human, shell script, CI job,
 
 AI agents are clients of Gremlins, not dependencies of Gremlins.
 
-> **Status:** pre-1.0. The core read-only capability layer works today. The current installer/deploy path still has some historical coupling to Ollama and Claude/Codex auto-registration; removing that coupling is the next implementation step.
+> **Status:** pre-1.0. The deterministic core installs and runs independently. Local-model providers, MCP, and Claude/Codex registration are explicit optional setup steps.
 
 ## The model
 
@@ -41,9 +41,9 @@ The caller decides what to do with the result. Gremlins does not need to know wh
 
 Current capabilities include:
 
-- exact read-only repository search;
-- bounded source excerpts;
-- bounded Git history;
+- exact read-only repository search (`repo-search`);
+- bounded source excerpts (`code-read`);
+- bounded Git history (`git-history`);
 - ranked multi-term repository exploration;
 - failure/log triage;
 - path and repository security checks;
@@ -130,9 +130,13 @@ uv run gremlins eval
 uv run gremlins benchmark pilot-local --repository .
 ```
 
-Run a capability directly:
+Run capabilities directly:
 
 ```bash
+uv run gremlins repo-search RetryExhaustedError --repository .
+uv run gremlins code-read src/gremlins/workers.py --repository . --start-line 1 --line-count 80
+uv run gremlins git-history --repository . --path src/gremlins/workers.py
+
 uv run gremlins repo-explore \
   "Find the provider configuration" \
   --repository . \
@@ -140,15 +144,29 @@ uv run gremlins repo-explore \
   --mode auto
 ```
 
-### Current convenience installer
+### Core installer and optional integrations
 
-`./install.sh` is still the original Mac-oriented convenience path. Today it prepares Ollama and attempts Claude/Codex integration.
+`./install.sh` installs the Python environment and bootstraps the deterministic core only. It does not install or require Ollama, Claude Code, or Codex.
 
-That is a **current implementation limitation**, not the intended dependency model. The next packaging work will split:
+Optional setup is explicit:
 
-- core install;
-- optional local-model provider setup;
-- optional client adapter registration.
+```bash
+# Core only
+./install.sh
+uv run gremlins doctor
+
+# Optional local-model provider
+uv run gremlins provider setup ollama
+
+# Optional MCP adapter
+uv run gremlins adapter install mcp
+
+# Optional client registration
+uv run gremlins adapter configure claude
+uv run gremlins adapter configure codex
+```
+
+Direct deterministic CLI commands remain usable without any of those optional integrations.
 
 ## Configuration
 
@@ -237,7 +255,7 @@ Near-term architectural work:
 - formalize stable input/output contracts;
 - make local-model providers optional plugins/adapters;
 - separate client integrations from core runtime packages;
-- generalize agent-specific status/terminology such as `needs-frontier`;
+- remove the legacy `needs-frontier` compatibility alias after the pre-1.0 migration window;
 - add stronger Linux packaging;
 - add HTTP/library adapters only when there is a concrete use case;
 - continue measurement at both capability and client-integration layers.
