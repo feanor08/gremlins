@@ -15,4 +15,4 @@ Use Gremlins when it can replace multiple frontier retrieval hops, not merely ad
 
 Pass a short task and exact targets, not the parent conversation. Gremlins workers cannot spawn children and never modify the repository.
 
-Deterministic `repo_explorer` results are ranked exact hits with compact hit-centered context. If `coverage.terms[TERM].all_returned` is true, Gremlins returned every exact match it found for that term; do not repeat the same broad search unless the task genuinely needs more context. If a result is `partial` or `needs-frontier`, continue from the returned evidence rather than restarting discovery from scratch.
+Deterministic `repo_explorer` results are ranked exact hits with compact hit-centered context. If `coverage.terms[TERM].all_returned` is true, Gremlins returned every exact match it found for that term; do not repeat the same broad search unless the task genuinely needs more context. If a result is `partial` or `needs-caller`, continue from the returned evidence rather than restarting discovery from scratch.

@@ -13,15 +13,15 @@ mcp = MCPServer(
     "Gremlins",
     instructions=(
         "Use Gremlins for cheap read-only repository exploration, exact search, Git history, and failure triage. "
-        "Prefer these tools before spawning a frontier subagent for mechanical evidence gathering. "
-        "Gremlins never modifies repositories and its local workers cannot spawn child agents."
+        "Prefer these tools before repeating mechanical evidence gathering in the caller. "
+        "Gremlins never modifies repositories and its local workers cannot spawn child workers."
     ),
 )
 
 
 @mcp.tool()
 def gremlins_status() -> dict:
-    """Check Gremlins configuration and local Ollama/model availability."""
+    """Check Gremlins runtime status and optional local-model availability."""
     config = load_config()
     try:
         provider = health(config)
@@ -93,7 +93,7 @@ def failure_triage(
     repository: str = ".",
     measurement_tag: str | None = None,
 ) -> dict:
-    """Bounded local log/test triage. Prefer path=... so the parent sends a filename, not the full log. Read-only."""
+    """Bounded local log/test triage. Prefer path=... so the caller sends a filename, not the full log. Read-only."""
     config = load_config()
     if path:
         repo = resolve_repository(repository, config)

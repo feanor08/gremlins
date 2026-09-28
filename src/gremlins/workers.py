@@ -303,7 +303,7 @@ def repo_explore(
             "next_queries": [],
         }
         usage = {"local_model_called": False, "provider_error": str(exc), "search_terms": search_terms}
-        status = "needs-frontier"
+        status = "needs-caller"
 
     preferred_ids = [
         evidence_id
@@ -331,6 +331,8 @@ def repo_explore(
         "truncated": truncated,
         "usage": usage,
     }
+    if status == "needs-caller":
+        result["legacy_status"] = "needs-frontier"
     record({
         "worker": "repo-explorer",
         "status": status,
@@ -397,7 +399,7 @@ def triage(text: str, task: str, config: Config, measurement_tag: str | None = N
             "limitations": [str(exc)],
         }
         usage = {"local_model_called": False, "provider_error": str(exc)}
-        status = "needs-frontier"
+        status = "needs-caller"
 
     compact = _compact_lines(evidence, config.limits.max_result_evidence_chars)
     result = {
@@ -408,6 +410,8 @@ def triage(text: str, task: str, config: Config, measurement_tag: str | None = N
         "evidence_lines_returned": len(compact),
         "usage": usage,
     }
+    if status == "needs-caller":
+        result["legacy_status"] = "needs-frontier"
     record({
         "worker": "triage",
         "status": status,
