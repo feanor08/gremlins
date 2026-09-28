@@ -14,6 +14,8 @@ from .config import load_config, project_root
 from .provider import ProviderError, health
 from .deployment import stack_lock_path, write_stack_lock
 from .workers import repo_explore, triage
+from .retrieval import git_history as _git_history, literal_search, read_excerpt, snapshot
+from .security import resolve_repository
 from .mcpcheck import check_python_module, check_wrapper
 from .benchmark import (
     BenchmarkRecord,
@@ -303,6 +305,39 @@ def doctor(_: argparse.Namespace) -> int:
     return 0 if core_ok else 2
 
 
+def run_repo_search(args: argparse.Namespace) -> int:
+    config = load_config()
+    repo = resolve_repository(args.repository, config)
+    items = literal_search(repo, args.query, config, scope=args.scope)
+    print(json.dumps({
+        "snapshot": snapshot(repo, config),
+        "matches": [item.as_dict() for item in items],
+    }, indent=2))
+    return 0
+
+
+def run_code_read(args: argparse.Namespace) -> int:
+    config = load_config()
+    repo = resolve_repository(args.repository, config)
+    evidence = read_excerpt(repo, args.path, config, args.start_line, args.line_count)
+    print(json.dumps({
+        "snapshot": snapshot(repo, config),
+        "evidence": evidence.as_dict(),
+    }, indent=2))
+    return 0
+
+
+def run_git_history(args: argparse.Namespace) -> int:
+    config = load_config()
+    repo = resolve_repository(args.repository, config)
+    items = _git_history(repo, config, path=args.path, query=args.query)
+    print(json.dumps({
+        "snapshot": snapshot(repo, config),
+        "history": [item.as_dict() for item in items],
+    }, indent=2))
+    return 0
+
+
 def run_repo(args: argparse.Namespace) -> int:
     print(json.dumps(
         repo_explore(
@@ -542,6 +577,25 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("mcp-smoke", help="Initialize Gremlins as a real MCP subprocess and verify its tool surface")
     p.set_defaults(func=mcp_smoke_cmd)
+
+    p = sub.add_parser("repo-search", help="Run exact read-only repository search directly")
+    p.add_argument("query")
+    p.add_argument("--repository", default=".")
+    p.add_argument("--scope", default=".")
+    p.set_defaults(func=run_repo_search)
+
+    p = sub.add_parser("code-read", help="Read a bounded source excerpt directly")
+    p.add_argument("path")
+    p.add_argument("--repository", default=".")
+    p.add_argument("--start-line", type=int, default=1)
+    p.add_argument("--line-count", type=int, default=120)
+    p.set_defaults(func=run_code_read)
+
+    p = sub.add_parser("git-history", help="Inspect bounded Git history directly")
+    p.add_argument("--repository", default=".")
+    p.add_argument("--path")
+    p.add_argument("--query")
+    p.set_defaults(func=run_git_history)
 
     p = sub.add_parser("repo-explore", help="Run repo explorer directly")
     p.add_argument("task")

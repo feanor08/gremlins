@@ -67,12 +67,18 @@ def test_explicit_setup_commands_parse():
     provider = parser.parse_args(["provider", "setup", "ollama", "--no-pull"])
     adapter = parser.parse_args(["adapter", "install", "mcp"])
     client = parser.parse_args(["adapter", "configure", "claude"])
+    search = parser.parse_args(["repo-search", "needle"])
+    read = parser.parse_args(["code-read", "src/example.py"])
+    history = parser.parse_args(["git-history", "--path", "src/example.py"])
 
     assert core.func is cli.setup
     assert provider.func is cli.provider_setup
     assert provider.pull is False
     assert adapter.func is cli.adapter_install
     assert client.func is cli.adapter_configure
+    assert search.func is cli.run_repo_search
+    assert read.func is cli.run_code_read
+    assert history.func is cli.run_git_history
 
 
 def test_install_script_bootstraps_core_only():
