@@ -1,0 +1,345 @@
+from __future__ import annotations
+
+from collections import Counter
+from datetime import datetime, timezone
+import json
+from pathlib import Path
+import re
+import shutil
+import subprocess
+import time
+from typing import Any
+
+from .benchmark import benchmark_root
+from .frontier_runner import (
+    _claude_command,
+    _ensure_clean_git_repository,
+    _ensure_frontier_client_ready,
+    _parse_claude_stream,
+    _require_valid_frontier_run,
+    _run_command,
+)
+
+
+EVIDENCE_SIGNALS = (
+    "find", "search", "locate", "identify", "inspect", "read", "trace", "gather",
+    "collect", "list", "references", "usages", "history", "git", "tests", "logs",
+    "files", "symbols", "where", "evidence", "map",
+)
+BOUNDED_ANALYSIS_SIGNALS = (
+    "summarize", "explain", "compare", "verify", "correlate", "classify",
+    "distill", "relationship", "flow", "reconcile",
+)
+REASONING_SIGNALS = (
+    "root cause", "why", "design", "architecture", "architectural", "plan",
+    "trade-off", "tradeoff", "recommend", "fix", "implementation", "race",
+    "correctness", "review", "hypothesis", "causal", "cause",
+)
+
+
+def observation_cases_path() -> Path:
+    return Path(__file__).resolve().parents[2] / "evals" / "subagent-observation" / "cases.json"
+
+
+def load_observation_cases() -> list[dict]:
+    data = json.loads(observation_cases_path().read_text(encoding="utf-8"))
+    if not isinstance(data, list):
+        raise RuntimeError("subagent observation corpus must be a JSON list")
+    return [row for row in data if isinstance(row, dict)]
+
+
+def classify_delegated_request(call: dict) -> dict:
+    subagent_type = str(call.get("subagent_type") or "").strip()
+    text = " ".join(
+        str(call.get(key) or "")
+        for key in ("description", "prompt")
+    ).lower()
+
+    evidence = sorted({signal for signal in EVIDENCE_SIGNALS if signal in text})
+    bounded = sorted({signal for signal in BOUNDED_ANALYSIS_SIGNALS if signal in text})
+    reasoning = sorted({signal for signal in REASONING_SIGNALS if signal in text})
+
+    lowered_type = subagent_type.lower()
+    if lowered_type == "explore":
+        label = "evidence-acquisition"
+    elif lowered_type == "plan":
+        label = "claude-level-reasoning"
+    elif lowered_type == "statusline-setup":
+        label = "utility-or-out-of-scope"
+    elif reasoning and evidence:
+        label = "mixed-evidence-and-reasoning"
+    elif reasoning:
+        label = "claude-level-reasoning"
+    elif evidence and bounded:
+        label = "bounded-analysis"
+    elif evidence:
+        label = "evidence-acquisition"
+    elif bounded:
+        label = "bounded-analysis"
+    else:
+        label = "unknown"
+
+    return {
+        "label": label,
+        "evidence_signals": evidence,
+        "bounded_analysis_signals": bounded,
+        "reasoning_signals": reasoning,
+        "method": "auditable-keyword-heuristic-plus-known-agent-type",
+        "note": (
+            "This classifies the delegated request, not the hidden token/time split inside "
+            "the spawned subagent. Review captured prompts before making product decisions."
+        ),
+    }
+
+
+def _prepare_observation_workspace(
+    source: Path,
+    study: str,
+    case_id: str,
+    iteration: int,
+) -> Path:
+    root = benchmark_root() / "workspaces" / study
+    root.mkdir(parents=True, exist_ok=True)
+    workspace = root / f"{case_id}-observe-r{iteration}"
+    if workspace.exists():
+        shutil.rmtree(workspace)
+
+    proc = subprocess.run(
+        ["git", "clone", "--quiet", "--no-hardlinks", str(source), str(workspace)],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(f"failed to create observation workspace: {proc.stderr.strip()}")
+
+    sparse = subprocess.run(
+        [
+            "git", "-C", str(workspace), "sparse-checkout", "set", "--no-cone",
+            "/*",
+            "!/evals/",
+            "!/skills/gremlins-delegation/",
+            "!/docs/MEASUREMENT.md",
+            "!/docs/MAC_REFERENCE.md",
+        ],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if sparse.returncode != 0:
+        raise RuntimeError(f"failed to isolate observation workspace: {sparse.stderr.strip()}")
+    return workspace
+
+
+def _observation_prompt(case: dict, workspace: Path) -> str:
+    return (
+        f"Repository: {workspace}\n"
+        f"Task: {case['task']}\n\n"
+        "Complete this read-only software-engineering task using your normal workflow. "
+        "Gremlins is unavailable for this task. Use Claude subagents only if you would "
+        "normally use them; do not spawn agents merely because this is an observation. "
+        "Do not modify files. Give a concise evidence-backed final answer."
+    )
+
+
+def _save_raw(study: str, case_id: str, iteration: int, stdout: str, stderr: str) -> dict:
+    directory = benchmark_root() / "raw" / study
+    directory.mkdir(parents=True, exist_ok=True)
+    base = directory / f"{case_id}-observe-r{iteration}"
+    stdout_path = base.with_suffix(".stdout.jsonl")
+    stderr_path = base.with_suffix(".stderr.txt")
+    stdout_path.write_text(stdout, encoding="utf-8")
+    stderr_path.write_text(stderr, encoding="utf-8")
+    return {"stdout": str(stdout_path), "stderr": str(stderr_path)}
+
+
+def run_claude_subagent_observation(
+    repository: str = ".",
+    *,
+    study: str = "mac-claude-subagents-v1",
+    repeats: int = 1,
+    case_ids: list[str] | None = None,
+    model: str | None = None,
+    timeout_seconds: int = 900,
+) -> dict:
+    if repeats < 1 or repeats > 3:
+        raise ValueError("repeats must be between 1 and 3")
+
+    _ensure_frontier_client_ready("claude")
+    source = _ensure_clean_git_repository(repository)
+    source_head = subprocess.run(
+        ["git", "-C", str(source), "rev-parse", "HEAD"],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    ).stdout.strip()
+    client_version = subprocess.run(
+        ["claude", "--version"],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+    ).stdout.strip()
+
+    cases = load_observation_cases()
+    if case_ids:
+        requested = set(case_ids)
+        cases = [case for case in cases if str(case.get("id")) in requested]
+        missing = requested - {str(case.get("id")) for case in cases}
+        if missing:
+            raise ValueError(f"unknown observation cases: {sorted(missing)}")
+    if not cases:
+        raise RuntimeError("no observation cases selected")
+
+    gremlins_tools = [
+        "mcp__gremlins__gremlins_status",
+        "mcp__gremlins__repo_search",
+        "mcp__gremlins__code_read",
+        "mcp__gremlins__git_history",
+        "mcp__gremlins__repo_explorer",
+        "mcp__gremlins__failure_triage",
+    ]
+
+    runs: list[dict] = []
+    all_calls: list[dict] = []
+    execution_errors: list[dict] = []
+
+    for iteration in range(1, repeats + 1):
+        for case in cases:
+            case_id = str(case["id"])
+            workspace = _prepare_observation_workspace(source, study, case_id, iteration)
+            prompt = _observation_prompt(case, workspace)
+            command = _claude_command(
+                prompt,
+                model,
+                allow_agents=True,
+                disallowed_tools=gremlins_tools,
+                permission_mode="plan",
+            )
+            started = time.monotonic()
+            try:
+                proc = _run_command(command, workspace, timeout_seconds)
+            except subprocess.TimeoutExpired as exc:
+                execution_errors.append({
+                    "case_id": case_id,
+                    "iteration": iteration,
+                    "error": f"TimeoutExpired: {exc}",
+                })
+                continue
+            elapsed = time.monotonic() - started
+            raw = _save_raw(study, case_id, iteration, proc.stdout, proc.stderr)
+            parsed = _parse_claude_stream(proc.stdout, proc.returncode, elapsed)
+            try:
+                _require_valid_frontier_run("claude", parsed, proc.returncode, proc.stderr)
+            except RuntimeError as exc:
+                execution_errors.append({
+                    "case_id": case_id,
+                    "iteration": iteration,
+                    "error": str(exc),
+                    "raw": raw,
+                })
+                continue
+
+            calls: list[dict] = []
+            for index, call in enumerate(parsed.metadata.get("subagent_details") or [], start=1):
+                enriched = {
+                    "case_id": case_id,
+                    "case_family": case.get("family"),
+                    "iteration": iteration,
+                    "call_index": index,
+                    **call,
+                    "classification": classify_delegated_request(call),
+                }
+                calls.append(enriched)
+                all_calls.append(enriched)
+
+            runs.append({
+                "case_id": case_id,
+                "family": case.get("family"),
+                "iteration": iteration,
+                "elapsed_seconds": round(elapsed, 3),
+                "usage": parsed.usage.__dict__,
+                "total_tool_calls": parsed.metadata.get("tool_calls"),
+                "subagent_calls": len(calls),
+                "subagents": calls,
+                "response_excerpt": parsed.response_text[:1200],
+                "raw": raw,
+            })
+
+    labels = Counter(
+        str(call["classification"]["label"])
+        for call in all_calls
+    )
+    types = Counter(
+        str(call.get("subagent_type") or call.get("tool_name") or "unknown")
+        for call in all_calls
+    )
+    families = Counter(str(run.get("family") or "unknown") for run in runs if run["subagent_calls"])
+    total_calls = len(all_calls)
+    evidence_only = labels.get("evidence-acquisition", 0)
+    bounded = labels.get("bounded-analysis", 0)
+    mixed = labels.get("mixed-evidence-and-reasoning", 0)
+    reasoning = labels.get("claude-level-reasoning", 0)
+
+    visible_nested = sum(
+        1
+        for call in all_calls
+        if call.get("parent_tool_use_id") or (call.get("observed_depth") or 0) > 0
+    )
+
+    report = {
+        "benchmark": "claude-subagent-observation-v1",
+        "study": study,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "source_repository": str(source),
+        "source_head": source_head,
+        "client": "claude",
+        "client_version": client_version,
+        "requested_model": model,
+        "corpus": {
+            "cases": len(cases),
+            "repeats": repeats,
+            "runs_expected": len(cases) * repeats,
+            "families": [str(case.get("family")) for case in cases],
+        },
+        "summary": {
+            "runs_completed": len(runs),
+            "execution_errors": len(execution_errors),
+            "runs_with_subagents": sum(run["subagent_calls"] > 0 for run in runs),
+            "total_subagent_calls": total_calls,
+            "subagent_types": dict(types),
+            "delegated_request_classes": dict(labels),
+            "pure_evidence_call_fraction": round(evidence_only / total_calls, 4) if total_calls else None,
+            "evidence_or_bounded_call_fraction": round((evidence_only + bounded) / total_calls, 4) if total_calls else None,
+            "calls_with_evidence_component_fraction": round((evidence_only + bounded + mixed) / total_calls, 4) if total_calls else None,
+            "claude_reasoning_call_fraction": round(reasoning / total_calls, 4) if total_calls else None,
+            "mixed_call_fraction": round(mixed / total_calls, 4) if total_calls else None,
+            "visible_nested_subagent_calls": visible_nested,
+            "families_with_subagents": dict(families),
+        },
+        "runs": runs,
+        "execution_errors": execution_errors,
+        "interpretation": {
+            "what_is_measured": (
+                "Observed parent Claude stream Agent/Task calls, their declared subagent type, "
+                "delegated prompt, and a transparent classification of the requested work."
+            ),
+            "what_is_not_measured": (
+                "The report does not claim exact token/time shares inside each spawned subagent. "
+                "Nested subagent calls are counted only when Claude's stream exposes them."
+            ),
+            "product_use": (
+                "Use evidence-acquisition and bounded-analysis calls as Gremlins opportunity "
+                "candidates. Keep Claude-level reasoning with Claude; mixed calls are candidates "
+                "for splitting evidence acquisition from reasoning rather than replacing the call wholesale."
+            ),
+        },
+    }
+
+    output_path = benchmark_root() / f"{study}.subagents.json"
+    output_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    report["report_file"] = str(output_path)
+    return report

@@ -438,3 +438,19 @@ def test_hidden_claim_acceptance_rejects_filename_only_answer():
     assert accepted is False
     assert missing_paths == []
     assert missing_claims == [["ProviderBusy"], ["busy"]]
+
+
+def test_parse_claude_stream_captures_subagent_details_and_parent_metadata():
+    stdout = "\n".join([
+        '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"agent-1","name":"Agent","input":{"subagent_type":"general-purpose","description":"Investigate failure","prompt":"Search logs and explain root cause","model":"sonnet"}}]}}',
+        '{"type":"assistant","parent_tool_use_id":"agent-1","message":{"role":"assistant","content":[{"type":"tool_use","id":"agent-2","name":"Agent","input":{"subagent_type":"Explore","description":"Find callers","prompt":"Locate all callers"}}]}}',
+        '{"type":"result","subtype":"success","is_error":false,"result":"done","usage":{"input_tokens":10,"output_tokens":5}}',
+    ])
+    result = _parse_claude_stream(stdout, 0, 1.0)
+    assert result.metadata["subagent_calls"] == 2
+    first, second = result.metadata["subagent_details"]
+    assert first["subagent_type"] == "general-purpose"
+    assert first["prompt"] == "Search logs and explain root cause"
+    assert second["subagent_type"] == "Explore"
+    assert second["parent_tool_use_id"] == "agent-1"
+    assert second["observed_depth"] == 1

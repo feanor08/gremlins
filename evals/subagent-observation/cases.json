@@ -1,0 +1,52 @@
+[
+  {
+    "id": "obs-001",
+    "family": "broad-discovery",
+    "task": "Find and explain how provider availability, busy state, and provider-unavailable state propagate through the runtime into public worker result contracts. Identify the important source and test files."
+  },
+  {
+    "id": "obs-002",
+    "family": "history-interpretation",
+    "task": "Investigate why the project uses needs-caller as the canonical escalation status while retaining needs-frontier compatibility. Use current code and Git history as needed, and explain the transition."
+  },
+  {
+    "id": "obs-003",
+    "family": "test-investigation",
+    "task": "Trace how the frontier benchmark rejects a Gremlins-assisted C arm that makes zero or repeated treatment calls. Identify the enforcement path and the tests that protect it."
+  },
+  {
+    "id": "obs-004",
+    "family": "root-cause-investigation",
+    "task": "A Gremlins-assisted benchmark C run completed successfully at the frontier client but recorded zero tagged Gremlins calls. Investigate plausible root-cause paths through prompt generation, MCP invocation, measurement tags, metrics recording, and benchmark validation. Distinguish evidence from hypotheses. Do not modify code."
+  },
+  {
+    "id": "obs-005",
+    "family": "architecture-planning",
+    "task": "Produce a read-only implementation plan for adding a future HTTP adapter without changing capability semantics. Identify critical files, boundaries, security concerns, and architectural trade-offs. Do not implement anything."
+  },
+  {
+    "id": "obs-006",
+    "family": "cross-file-flow",
+    "task": "Explain the end-to-end flow from core setup through MCP adapter installation and optional Claude/Codex client configuration. Identify where caller independence is enforced."
+  },
+  {
+    "id": "obs-007",
+    "family": "security-investigation",
+    "task": "Investigate how repository allowed-root security is enforced and how the model-value benchmark authorizes only its own temporary workspace without globally widening repository access."
+  },
+  {
+    "id": "obs-008",
+    "family": "test-to-source",
+    "task": "Map the tests that cover deterministic versus model repo-explorer behavior to the source functions they exercise, and explain what each test protects."
+  },
+  {
+    "id": "obs-009",
+    "family": "fuzzy-discovery",
+    "task": "Find where the system records, aggregates, and reports whether a local model was called, even if the exact symbol names are not obvious at the start. Explain the data flow."
+  },
+  {
+    "id": "obs-010",
+    "family": "ci-investigation",
+    "task": "Trace the normal CI validation path on Ubuntu and macOS: what deterministic checks and benchmarks run, where they are configured, and which model-dependent studies are intentionally excluded from normal CI."
+  }
+]

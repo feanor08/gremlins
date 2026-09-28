@@ -143,6 +143,39 @@ The benchmark returned `stable_material_value=true` with no failed stability rea
 
 It also does not answer whether Claude, Codex, or another coding client saves frontier work by using Gremlins. That remains the client-integration B/C experiment below.
 
+## Claude subagent observation before replacement benchmarking
+
+Before deciding what additional Gremlins capabilities to build, observe Claude's normal delegation behavior with Gremlins hard-disabled:
+
+```bash
+uv run gremlins benchmark observe-claude-subagents \
+  --repository . \
+  --study mac-claude-subagents-v1 \
+  --repeats 1
+```
+
+The v1 corpus contains ten read-only software-engineering task families, including broad/fuzzy discovery, history interpretation, test investigation, root-cause investigation, architecture planning, cross-file flow, security investigation, test-to-source mapping, fuzzy local-model-usage discovery, and CI investigation.
+
+The observation harness:
+
+- disables every Gremlins MCP tool for the run;
+- allows Claude's Agent tool and does not instruct Claude to spawn agents;
+- asks Claude to use its normal workflow;
+- removes the benchmark corpus and Gremlins delegation/measurement reference docs from each isolated observation workspace;
+- records raw Claude stream JSON locally for audit;
+- captures every visible `Agent`/`Task` tool call, declared subagent type, delegated description/prompt, and parent tool-use metadata when exposed;
+- reports visible nested/sub-sub-agent calls when the Claude stream exposes parent relationships;
+- classifies the **delegated request** as evidence acquisition, bounded analysis, mixed evidence+reasoning, Claude-level reasoning, utility/out-of-scope, or unknown.
+
+The classifier is intentionally transparent and non-gating. It uses known agent semantics (`Explore` is retrieval, `Plan` is planning/reasoning) plus explicit keyword signals for catch-all/general-purpose prompts. The report includes the matched signals and raw delegated prompts so the classification can be reviewed manually.
+
+Two different quantities matter:
+
+1. **Subagent mix:** which agent types Claude actually spawns and how often.
+2. **Delegated-work mix:** what fraction of observed calls are pure evidence acquisition, bounded analysis, mixed evidence+reasoning, or Claude-level reasoning.
+
+The report does **not** claim to know exact token/time percentages inside hidden subagent execution. A mixed call is a candidate to split—Gremlins can gather evidence while Claude retains reasoning—not a candidate for wholesale replacement. Nested calls are only measurable when Claude surfaces them in the parent stream.
+
 ## Claude/Codex integration gate before THG
 
 THG deployment is intentionally paused until Gremlins is tested with both frontier clients on the Mac reference environment.

@@ -20,6 +20,7 @@ from .mcpcheck import check_python_module, check_wrapper
 from .capability_benchmark import run_capability_benchmark
 from .model_value_benchmark import run_model_value_benchmark
 from .triage_stability_benchmark import run_triage_stability_benchmark
+from .subagent_observation import run_claude_subagent_observation
 from .benchmark import (
     BenchmarkRecord,
     Prices,
@@ -561,6 +562,23 @@ def benchmark_triage_stability_cmd(args: argparse.Namespace) -> int:
     return 0
 
 
+def benchmark_claude_subagents_cmd(args: argparse.Namespace) -> int:
+    try:
+        report = run_claude_subagent_observation(
+            args.repository,
+            study=args.study,
+            repeats=args.repeats,
+            case_ids=args.case,
+            model=args.model,
+            timeout_seconds=args.timeout_seconds,
+        )
+    except (RuntimeError, ValueError) as exc:
+        print(json.dumps({"benchmark": "claude-subagent-observation-v1", "error": str(exc)}, indent=2), file=sys.stderr)
+        return 2
+    print(json.dumps(report, indent=2))
+    return 0
+
+
 def benchmark_clear_cmd(args: argparse.Namespace) -> int:
     path = study_path(args.study)
     if path.exists():
@@ -781,6 +799,15 @@ def build_parser() -> argparse.ArgumentParser:
     bp.add_argument("--min-stable-case-fraction", type=float, default=0.90)
     bp.add_argument("--max-regressed-case-fraction", type=float, default=0.10)
     bp.set_defaults(func=benchmark_triage_stability_cmd)
+
+    bp = bench.add_parser("observe-claude-subagents", help="Observe normal Claude subagent delegation with Gremlins disabled")
+    bp.add_argument("--repository", default=".")
+    bp.add_argument("--study", default="mac-claude-subagents-v1")
+    bp.add_argument("--repeats", type=int, default=1)
+    bp.add_argument("--case", action="append", help="Run only selected observation case; repeatable")
+    bp.add_argument("--model")
+    bp.add_argument("--timeout-seconds", type=int, default=900)
+    bp.set_defaults(func=benchmark_claude_subagents_cmd)
 
     bp = bench.add_parser("clear", help="Clear a local benchmark study")
     bp.add_argument("--study", default="pilot")
