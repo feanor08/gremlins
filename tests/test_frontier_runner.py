@@ -194,6 +194,17 @@ def test_claude_auth_preflight_rejects_logged_out_client(monkeypatch):
         raise AssertionError("logged-out Claude client must fail benchmark preflight")
 
 
+def test_claude_auth_preflight_accepts_headless_env_credential(monkeypatch):
+    monkeypatch.setattr(frontier_runner.shutil, "which", lambda client: "/usr/local/bin/claude")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("interactive auth status must not be required for CI credentials")
+
+    monkeypatch.setattr(frontier_runner.subprocess, "run", fail_if_called)
+    _ensure_frontier_client_ready("claude")
+
+
 def test_claude_auth_preflight_accepts_logged_in_client(monkeypatch):
     monkeypatch.setattr(frontier_runner.shutil, "which", lambda client: "/usr/local/bin/claude")
     monkeypatch.setattr(

@@ -72,6 +72,13 @@ def _ensure_frontier_client_ready(client: str) -> None:
     if client != "claude":
         return
 
+    # CI and other headless environments commonly provide Claude credentials
+    # through environment variables instead of an interactive login. The
+    # workflow performs a real one-turn auth smoke before the benchmark; here
+    # we only avoid rejecting a valid noninteractive credential prematurely.
+    if os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"):
+        return
+
     try:
         proc = subprocess.run(
             ["claude", "auth", "status"],
