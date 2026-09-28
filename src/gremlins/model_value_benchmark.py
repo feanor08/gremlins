@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import json
 import math
 from pathlib import Path
@@ -311,7 +311,15 @@ def run_model_value_benchmark(
                 raise ValueError(f"unknown repo model-value cases: {sorted(missing)}")
 
         with tempfile.TemporaryDirectory(prefix=".gremlins-model-value-", dir=str(source.parent)) as temp_dir:
-            workspace = Path(temp_dir) / "repo"
+            temp_root = Path(temp_dir).resolve()
+            workspace = temp_root / "repo"
+            config = replace(
+                config,
+                security=replace(
+                    config.security,
+                    allowed_roots=(*config.security.allowed_roots, temp_root),
+                ),
+            )
             clone = subprocess.run(
                 ["git", "clone", "--quiet", "--no-hardlinks", str(source), str(workspace)],
                 text=True,

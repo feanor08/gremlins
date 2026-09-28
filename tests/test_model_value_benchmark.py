@@ -125,3 +125,54 @@ def test_model_value_cli_parses():
     assert args.func is benchmark_model_value_cmd
     assert args.worker == "triage"
     assert args.min_quality_gain == 0.2
+
+
+def test_model_value_benchmark_allows_only_its_created_workspace(monkeypatch, tmp_path: Path):
+    repo = _fixture_repo(tmp_path)
+    monkeypatch.setattr(model_value, "health", lambda config: {
+        "ok": True,
+        "model_present": True,
+        "models": [config.provider.model],
+    })
+    monkeypatch.setattr(model_value, "load_pilot_cases", lambda: [{
+        "id": "repo-case",
+        "task": "Find NeedleError",
+        "terms": ["NeedleError"],
+        "expected_paths": ["sample.py"],
+        "expected_claims": [["NeedleError"]],
+    }])
+
+    seen = {}
+
+    def fake_repo_explore(repository, task, config, mode, **kwargs):
+        workspace = Path(repository).resolve()
+        seen["workspace"] = workspace
+        seen["allowed_roots"] = tuple(config.security.allowed_roots)
+        assert any(
+            workspace == root or workspace.is_relative_to(root)
+            for root in config.security.allowed_roots
+        )
+        return {
+            "status": "complete",
+            "files": [{"path": "sample.py", "hits": [{"line": 1, "text": "NeedleError"}]}],
+            "evidence": [{"id": "s1", "kind": "search", "path": "sample.py", "text": "NeedleError"}],
+            "usage": {
+                "local_model_called": mode == "model",
+                "prompt_eval_count": 10 if mode == "model" else None,
+                "eval_count": 5 if mode == "model" else None,
+            },
+        }
+
+    monkeypatch.setattr(model_value, "repo_explore", fake_repo_explore)
+
+    report = model_value.run_model_value_benchmark(
+        str(repo),
+        worker="repo-explore",
+        min_quality_gain=0.0,
+    )
+
+    assert report["repo_explore"]["summary"]["cases"] == 1
+    workspace = seen["workspace"]
+    assert workspace.name == "repo"
+    assert any(workspace.is_relative_to(root) for root in seen["allowed_roots"])
+    assert repo.parent.resolve() not in seen["allowed_roots"]
