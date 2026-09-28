@@ -1596,6 +1596,16 @@ Make the current small system trustworthy enough to measure.
 
 ---
 
+## Caller-independent capability measurement
+
+**Status:** Capability Benchmark v1 implemented and enforced in normal CI.
+
+Before client-specific savings are considered, Gremlins now validates its own deterministic capability layer independently. The v1 gate covers exact search, bounded reads, Git history, deterministic repo exploration, log-evidence extraction, policy enforcement, contract shape, result-size bounds, and zero model calls. Latency and process resource use are recorded for trend analysis but are not hard CI thresholds yet.
+
+This product-level baseline is separate from the frontier-client integration experiment below.
+
+---
+
 ## Workstream G — measure whether Gremlins actually saves frontier work
 
 **Implementation status:** measurement harness implemented. The product gate remains **pending** until real paired frontier runs are collected on the Mac and satisfy the criteria below. No later gated workstream should be treated as unlocked yet.

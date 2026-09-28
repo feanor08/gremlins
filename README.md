@@ -127,8 +127,11 @@ Run deterministic validation:
 ```bash
 uv run pytest -q
 uv run gremlins eval
+uv run gremlins benchmark capabilities --repository .
 uv run gremlins benchmark pilot-local --repository .
 ```
+
+`benchmark capabilities` is the caller-independent product gate. It checks exact search, bounded reads, Git history, deterministic repo exploration, log-evidence extraction, path/security policy, stable result shapes, bounded result size, and zero local-model calls. It also reports latency, CPU time, and process peak RSS for trend tracking without making those machine-sensitive measurements hard pass/fail thresholds in v1.
 
 Run capabilities directly:
 

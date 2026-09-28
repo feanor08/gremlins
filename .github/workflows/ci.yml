@@ -25,4 +25,5 @@ jobs:
       - run: uv run python -c "from gremlins.server import mcp; print(mcp.name)"
       - run: uv run gremlins mcp-smoke
       - run: uv run gremlins eval
+      - run: uv run gremlins benchmark capabilities --repository .
       - run: uv run gremlins benchmark pilot-local --repository .
