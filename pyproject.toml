@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "gremlins"
 version = "0.1.0"
-description = "Local-first read-only evidence workers for coding agents"
+description = "Caller-independent local capability runtime for software-development automation"
 readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "MIT"}

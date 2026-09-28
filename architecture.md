@@ -408,7 +408,7 @@ failed
 cancelled
 ```
 
-The current implementation still exposes the legacy name `needs-frontier`. That is compatibility debt from the coding-agent-first prototype and should migrate to caller-neutral terminology without changing the underlying escalation semantics.
+The current implementation still exposes the legacy name `needs-caller`. That is compatibility debt from the coding-agent-first prototype and should migrate to caller-neutral terminology without changing the underlying escalation semantics.
 
 A structured schema alone is not enough.
 
@@ -669,7 +669,7 @@ Each provider adapter implements the same internal operations:
 
 Gremlins never silently converts a local-only request into cloud inference.
 
-If no compatible local provider exists, the worker returns `needs-frontier`.
+If no compatible local provider exists, the worker returns `needs-caller`.
 
 Claude/Codex can then decide what to do.
 
@@ -1428,7 +1428,7 @@ Evaluate three layers.
 - expected failure signatures found;
 - important evidence not omitted;
 - no invented files/commits;
-- appropriate `needs-frontier` behavior.
+- appropriate `needs-caller` behavior.
 
 ## Operational/security
 
@@ -1456,7 +1456,7 @@ deterministic parser/tool
 small bounded local model
         |
         v
-return needs-frontier
+return needs-caller
         |
         v
 frontier orchestrator decides
@@ -1522,7 +1522,7 @@ Implemented now:
 - compact frontier-facing evidence results;
 - orchestrator-supplied exact terms/symbols;
 - deterministic-only repo exploration path;
-- distinct `busy` and `needs-frontier` statuses;
+- distinct `busy` and `needs-caller` statuses;
 - machine-specific allowed roots in deployment profiles rather than canonical config;
 - macOS and Linux CI;
 - A/B/C benchmark data model;
@@ -1566,11 +1566,11 @@ Make the current small system trustworthy enough to measure.
 - keep returned worker evidence compact and independently bounded from local-model input;
 - accept orchestrator-supplied exact terms/symbols;
 - support a real deterministic-only return path;
-- distinguish `busy` from `needs-frontier`;
+- distinguish `busy` from `needs-caller`;
 - pin dependencies with committed `uv.lock`;
 - strengthen installer idempotency;
 - improve `doctor` so it tests actual MCP invocation rather than only executable presence;
-- split core install, local-model provider setup, and client-adapter registration;
+- keep core install, local-model provider setup, and client-adapter registration as separate explicit operations;
 - add installer recovery if optional client registration fails;
 - detect unsupported optional client CLI syntax cleanly;
 - add model warm-up checks only for profiles that enable local inference;
@@ -1591,7 +1591,7 @@ Make the current small system trustworthy enough to measure.
 - tests pass on macOS;
 - returned evidence is bounded tightly enough that a Gremlins call does not recreate a large frontier context;
 - local worker failure never damages a repository;
-- unavailable local inference returns useful evidence plus `needs-frontier`;
+- unavailable local inference returns useful evidence plus `needs-caller`;
 - local inference contention returns `busy`, not a misleading escalation status.
 
 ---
@@ -2020,11 +2020,13 @@ Examples:
 
 ## Local model unavailable
 
-Return deterministic evidence and:
+Return deterministic evidence and the caller-neutral status:
 
 ```text
-status: needs-frontier
+status: needs-caller
 ```
+
+During the pre-1.0 compatibility window, model-unavailable results also include `legacy_status: needs-frontier` for consumers migrating from the prototype contract. New consumers must use `status`.
 
 ## Inference slot busy
 
@@ -2055,7 +2057,7 @@ Retry only when the operation is safely retryable.
 
 Attempt at most a tightly bounded repair if explicitly enabled.
 
-Otherwise return `needs-frontier`.
+Otherwise return `needs-caller`.
 
 No retry storms.
 
