@@ -39,7 +39,7 @@ def test_compact_evidence_obeys_result_budget():
     assert len(compact) < len(evidence)
 
 
-def test_busy_provider_is_not_reported_as_needs_frontier(monkeypatch):
+def test_busy_provider_is_not_reported_as_needs_caller(monkeypatch):
     def busy(*args, **kwargs):
         raise ProviderBusy("local inference is busy")
 
@@ -245,3 +245,33 @@ def test_repo_explorer_model_mode_is_explicit(monkeypatch, tmp_path: Path):
         mode="model",
     )
     assert result["usage"]["local_model_called"] is True
+
+
+def test_model_unavailable_uses_caller_neutral_status_with_legacy_alias(monkeypatch, tmp_path: Path):
+    repo = tmp_path / "repo-unavailable"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=repo, check=True)
+    (repo / "x.py").write_text("needle = 1\n", encoding="utf-8")
+    subprocess.run(["git", "add", "x.py"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "fixture"], cwd=repo, check=True)
+
+    monkeypatch.setattr(workers, "resolve_repository", lambda *args, **kwargs: repo.resolve())
+
+    def unavailable(*args, **kwargs):
+        raise workers.ProviderError("provider unavailable")
+
+    monkeypatch.setattr(workers, "chat_json", unavailable)
+
+    result = workers.repo_explore(
+        str(repo),
+        "Explain needle",
+        load_config(),
+        terms=["needle"],
+        mode="model",
+    )
+
+    assert result["status"] == "needs-caller"
+    assert result["legacy_status"] == "needs-frontier"
+    assert result["usage"]["local_model_called"] is False
