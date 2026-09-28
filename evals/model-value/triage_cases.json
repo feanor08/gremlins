@@ -1,67 +1,554 @@
 [
   {
     "id": "triage-001",
+    "category": "dependency",
     "task": "Group the failures, identify directly supported likely causes, and give the next checks.",
-    "log": "ERROR collecting tests/test_api.py\nTraceback (most recent call last):\n  File \"tests/test_api.py\", line 3, in <module>\n    import httpx\nModuleNotFoundError: No module named 'httpx'\nFAILED tests/test_api.py - ModuleNotFoundError\n",
+    "log": "ERROR collecting tests/test_api.py\\nTraceback (most recent call last):\\n  File \\\"tests/test_api.py\\\", line 3, in <module>\\n    import httpx\\nModuleNotFoundError: No module named 'httpx'\\nFAILED tests/test_api.py - ModuleNotFoundError\\n",
     "expected_evidence": [
-      ["ModuleNotFoundError"],
-      ["httpx"]
+      [
+        "ModuleNotFoundError"
+      ],
+      [
+        "httpx"
+      ]
     ],
     "expected_analysis": [
-      ["missing dependency", "dependency is missing", "missing package", "install httpx"],
-      ["dependency", "package"]
+      [
+        "missing dependency",
+        "dependency is missing",
+        "missing package",
+        "install httpx"
+      ],
+      [
+        "dependency",
+        "package"
+      ]
     ]
   },
   {
     "id": "triage-002",
+    "category": "local-service",
     "task": "Group the failures, identify directly supported likely causes, and give the next checks.",
-    "log": "ERROR test_model_chat\nPOST http://127.0.0.1:11434/api/chat\nurllib.error.URLError: <urlopen error [Errno 111] Connection refused>\nFAILED tests/test_provider.py::test_model_chat\n",
+    "log": "ERROR test_model_chat\\nPOST http://127.0.0.1:11434/api/chat\\nurllib.error.URLError: <urlopen error [Errno 111] Connection refused>\\nFAILED tests/test_provider.py::test_model_chat\\n",
     "expected_evidence": [
-      ["127.0.0.1:11434"],
-      ["Connection refused"]
+      [
+        "127.0.0.1:11434"
+      ],
+      [
+        "Connection refused"
+      ]
     ],
     "expected_analysis": [
-      ["provider unavailable", "service is not running", "service unavailable", "provider is not running", "ollama"],
-      ["start the service", "check the service", "provider health", "verify the service"]
+      [
+        "provider unavailable",
+        "service is not running",
+        "service unavailable",
+        "provider is not running",
+        "ollama"
+      ],
+      [
+        "start the service",
+        "check the service",
+        "provider health",
+        "verify the service"
+      ]
     ]
   },
   {
     "id": "triage-003",
+    "category": "storage",
     "task": "Group the failures, identify directly supported likely causes, and give the next checks.",
-    "log": "ERROR writing test artifact\nOSError: [Errno 28] No space left on device: '/tmp/results.json'\nFAILED tests/test_export.py::test_write_artifact\n",
+    "log": "ERROR writing test artifact\\nOSError: [Errno 28] No space left on device: '/tmp/results.json'\\nFAILED tests/test_export.py::test_write_artifact\\n",
     "expected_evidence": [
-      ["Errno 28"],
-      ["No space left on device"]
+      [
+        "Errno 28"
+      ],
+      [
+        "No space left on device"
+      ]
     ],
     "expected_analysis": [
-      ["disk space", "storage", "disk is full", "filesystem is full"],
-      ["free space", "disk usage", "clear space", "available space"]
+      [
+        "disk space",
+        "storage",
+        "disk is full",
+        "filesystem is full"
+      ],
+      [
+        "free space",
+        "disk usage",
+        "clear space",
+        "available space"
+      ]
     ]
   },
   {
     "id": "triage-004",
+    "category": "authentication",
     "task": "Group the failures, identify directly supported likely causes, and give the next checks.",
-    "log": "ERROR tests/test_auth.py::test_profile\nAssertionError: expected HTTP 200, got HTTP 401\nresponse body: {\"detail\":\"invalid token\"}\nFAILED tests/test_auth.py::test_profile\n",
+    "log": "ERROR tests/test_auth.py::test_profile\\nAssertionError: expected HTTP 200, got HTTP 401\\nresponse body: {\\\"detail\\\":\\\"invalid token\\\"}\\nFAILED tests/test_auth.py::test_profile\\n",
     "expected_evidence": [
-      ["HTTP 401"],
-      ["invalid token"]
+      [
+        "HTTP 401"
+      ],
+      [
+        "invalid token"
+      ]
     ],
     "expected_analysis": [
-      ["authentication", "credential", "authorization"],
-      ["token", "credentials"]
+      [
+        "authentication",
+        "credential",
+        "authorization"
+      ],
+      [
+        "token",
+        "credentials"
+      ]
     ]
   },
   {
     "id": "triage-005",
+    "category": "database",
     "task": "Group the failures, identify directly supported likely causes, and give the next checks.",
-    "log": "ERROR worker startup\nTimeoutError: waited 30s for database connection pool\nretry 1 failed after 30s\nretry 2 failed after 30s\nFAILED tests/test_worker.py::test_startup\n",
+    "log": "ERROR worker startup\\nTimeoutError: waited 30s for database connection pool\\nretry 1 failed after 30s\\nretry 2 failed after 30s\\nFAILED tests/test_worker.py::test_startup\\n",
     "expected_evidence": [
-      ["TimeoutError"],
-      ["database connection pool"]
+      [
+        "TimeoutError"
+      ],
+      [
+        "database connection pool"
+      ]
     ],
     "expected_analysis": [
-      ["database connectivity", "database connection", "database unavailable", "connection pool"],
-      ["check the database", "database health", "connectivity"]
+      [
+        "database connectivity",
+        "database connection",
+        "database unavailable",
+        "connection pool"
+      ],
+      [
+        "check the database",
+        "database health",
+        "connectivity"
+      ]
+    ]
+  },
+  {
+    "id": "triage-006",
+    "category": "dns",
+    "task": "Group the failures, identify directly supported likely causes, and give the next checks.",
+    "log": "ERROR fetching metadata\\nsocket.gaierror: [Errno 8] nodename nor servname provided, or not known: api.internal.example\\nFAILED tests/test_metadata.py::test_fetch\\n",
+    "expected_evidence": [
+      [
+        "gaierror"
+      ],
+      [
+        "api.internal.example"
+      ]
+    ],
+    "expected_analysis": [
+      [
+        "DNS",
+        "name resolution",
+        "hostname resolution",
+        "resolve the hostname"
+      ],
+      [
+        "check DNS",
+        "verify hostname",
+        "DNS configuration",
+        "name resolution"
+      ]
+    ]
+  },
+  {
+    "id": "triage-007",
+    "category": "permissions",
+    "task": "Group the failures, identify directly supported likely causes, and give the next checks.",
+    "log": "ERROR writing cache\\nPermissionError: [Errno 13] Permission denied: '/var/cache/myapp/state.json'\\nFAILED tests/test_cache.py::test_write\\n",
+    "expected_evidence": [
+      [
+        "PermissionError"
+      ],
+      [
+        "Permission denied"
+      ]
+    ],
+    "expected_analysis": [
+      [
+        "permission",
+        "access rights",
+        "file permissions"
+      ],
+      [
+        "ownership",
+        "permissions",
+        "writable",
+        "write access"
+      ]
+    ]
+  },
+  {
+    "id": "triage-008",
+    "category": "port-conflict",
+    "task": "Group the failures, identify directly supported likely causes, and give the next checks.",
+    "log": "ERROR server startup\\nOSError: [Errno 48] Address already in use ('127.0.0.1', 8080)\\nFAILED tests/test_server.py::test_start\\n",
+    "expected_evidence": [
+      [
+        "Address already in use"
+      ],
+      [
+        "8080"
+      ]
+    ],
+    "expected_analysis": [
+      [
+        "port conflict",
+        "already bound",
+        "another process",
+        "port is in use"
+      ],
+      [
+        "find the process",
+        "stop the process",
+        "change the port",
+        "check port"
+      ]
+    ]
+  },
+  {
+    "id": "triage-009",
+    "category": "tls",
+    "task": "Group the failures, identify directly supported likely causes, and give the next checks.",
+    "log": "ERROR HTTPS request\\nssl.SSLCertVerificationError: certificate verify failed: certificate has expired (_ssl.c:1016)\\nFAILED tests/test_tls.py::test_endpoint\\n",
+    "expected_evidence": [
+      [
+        "SSLCertVerificationError"
+      ],
+      [
+        "certificate has expired"
+      ]
+    ],
+    "expected_analysis": [
+      [
+        "expired certificate",
+        "certificate expired",
+        "TLS certificate"
+      ],
+      [
+        "renew certificate",
+        "replace certificate",
+        "check certificate",
+        "certificate expiry"
+      ]
+    ]
+  },
+  {
+    "id": "triage-010",
+    "category": "configuration",
+    "task": "Group the failures, identify directly supported likely causes, and give the next checks.",
+    "log": "ERROR loading config\\njson.decoder.JSONDecodeError: Expecting ',' delimiter: line 14 column 5 (char 312)\\nFAILED tests/test_config.py::test_load\\n",
+    "expected_evidence": [
+      [
+        "JSONDecodeError"
+      ],
+      [
+        "line 14 column 5"
+      ]
+    ],
+    "expected_analysis": [
+      [
+        "malformed JSON",
+        "JSON syntax",
+        "invalid JSON",
+        "configuration syntax"
+      ],
+      [
+        "line 14",
+        "validate JSON",
+        "fix the JSON",
+        "check the config"
+      ]
+    ]
+  },
+  {
+    "id": "triage-011",
+    "category": "filesystem",
+    "task": "Group the failures, identify directly supported likely causes, and give the next checks.",
+    "log": "ERROR application startup\\nFileNotFoundError: [Errno 2] No such file or directory: '/etc/myapp/config.yaml'\\nFAILED tests/test_boot.py::test_config_present\\n",
+    "expected_evidence": [
+      [
+        "FileNotFoundError"
+      ],
+      [
+        "/etc/myapp/config.yaml"
+      ]
+    ],
+    "expected_analysis": [
+      [
+        "missing file",
+        "file is missing",
+        "incorrect path",
+        "config file"
+      ],
+      [
+        "check the path",
+        "create the file",
+        "verify the file",
+        "config.yaml"
+      ]
+    ]
+  },
+  {
+    "id": "triage-012",
+    "category": "memory",
+    "task": "Group the failures, identify directly supported likely causes, and give the next checks.",
+    "log": "ERROR processing fixture\\nMemoryError: unable to allocate buffer for 2147483648 bytes\\nFAILED tests/test_import.py::test_large_fixture\\n",
+    "expected_evidence": [
+      [
+        "MemoryError"
+      ],
+      [
+        "2147483648"
+      ]
+    ],
+    "expected_analysis": [
+      [
+        "memory exhaustion",
+        "out of memory",
+        "memory allocation",
+        "insufficient memory"
+      ],
+      [
+        "memory usage",
+        "reduce memory",
+        "increase memory",
+        "smaller buffer"
+      ]
+    ]
+  },
+  {
+    "id": "triage-013",
+    "category": "assertion",
+    "task": "Group the failures, identify directly supported likely causes, and give the next checks.",
+    "log": "ERROR tests/test_counter.py::test_increment\\nAssertionError: expected 42, got 41\\nFAILED tests/test_counter.py::test_increment\\n",
+    "expected_evidence": [
+      [
+        "expected 42"
+      ],
+      [
+        "got 41"
+      ]
+    ],
+    "expected_analysis": [
+      [
+        "expected",
+        "actual",
+        "mismatch",
+        "off by one"
+      ],
+      [
+        "counter",
+        "increment",
+        "test expectation",
+        "compare expected"
+      ]
+    ]
+  },
+  {
+    "id": "triage-014",
+    "category": "database-schema",
+    "task": "Group the failures, identify directly supported likely causes, and give the next checks.",
+    "log": "ERROR querying profile\\nsqlite3.OperationalError: no such table: users\\nFAILED tests/test_profile.py::test_lookup\\n",
+    "expected_evidence": [
+      [
+        "OperationalError"
+      ],
+      [
+        "no such table: users"
+      ]
+    ],
+    "expected_analysis": [
+      [
+        "schema",
+        "migration",
+        "missing table",
+        "database initialization"
+      ],
+      [
+        "run migration",
+        "apply migration",
+        "check schema",
+        "create table"
+      ]
+    ]
+  },
+  {
+    "id": "triage-015",
+    "category": "network",
+    "task": "Group the failures, identify directly supported likely causes, and give the next checks.",
+    "log": "ERROR streaming response\\nConnectionResetError: [Errno 54] Connection reset by peer\\nFAILED tests/test_stream.py::test_download\\n",
+    "expected_evidence": [
+      [
+        "ConnectionResetError"
+      ],
+      [
+        "Connection reset by peer"
+      ]
+    ],
+    "expected_analysis": [
+      [
+        "remote peer",
+        "connection dropped",
+        "connection reset",
+        "upstream"
+      ],
+      [
+        "check upstream",
+        "network",
+        "retry",
+        "remote service"
+      ]
+    ]
+  },
+  {
+    "id": "triage-016",
+    "category": "rate-limit",
+    "task": "Group the failures, identify directly supported likely causes, and give the next checks.",
+    "log": "ERROR API request\\nHTTP 429 Too Many Requests\\nRetry-After: 30\\nFAILED tests/test_api_client.py::test_batch\\n",
+    "expected_evidence": [
+      [
+        "429"
+      ],
+      [
+        "Retry-After: 30"
+      ]
+    ],
+    "expected_analysis": [
+      [
+        "rate limit",
+        "rate limiting",
+        "too many requests"
+      ],
+      [
+        "backoff",
+        "Retry-After",
+        "reduce request rate",
+        "retry after"
+      ]
+    ]
+  },
+  {
+    "id": "triage-017",
+    "category": "artifact-integrity",
+    "task": "Group the failures, identify directly supported likely causes, and give the next checks.",
+    "log": "ERROR unpacking artifact\\nChecksumError: expected sha256 8d3a, got 771c for build.tar.gz\\nFAILED tests/test_artifact.py::test_verify\\n",
+    "expected_evidence": [
+      [
+        "ChecksumError"
+      ],
+      [
+        "build.tar.gz"
+      ]
+    ],
+    "expected_analysis": [
+      [
+        "checksum mismatch",
+        "corrupt artifact",
+        "corrupted download",
+        "integrity"
+      ],
+      [
+        "redownload",
+        "verify source",
+        "re-fetch",
+        "expected checksum"
+      ]
+    ]
+  },
+  {
+    "id": "triage-018",
+    "category": "input-format",
+    "task": "Group the failures, identify directly supported likely causes, and give the next checks.",
+    "log": "ERROR parsing event\\nValueError: Invalid isoformat string: '2026-99-42T25:61:00'\\nFAILED tests/test_events.py::test_parse_timestamp\\n",
+    "expected_evidence": [
+      [
+        "Invalid isoformat string"
+      ],
+      [
+        "2026-99-42T25:61:00"
+      ]
+    ],
+    "expected_analysis": [
+      [
+        "invalid timestamp",
+        "malformed timestamp",
+        "date format",
+        "ISO format"
+      ],
+      [
+        "validate input",
+        "timestamp format",
+        "correct the timestamp",
+        "date/time"
+      ]
+    ]
+  },
+  {
+    "id": "triage-019",
+    "category": "tooling",
+    "task": "Group the failures, identify directly supported likely causes, and give the next checks.",
+    "log": "ERROR preparing repository\\nFileNotFoundError: [Errno 2] No such file or directory: 'git-lfs'\\nFAILED tests/test_checkout.py::test_lfs\\n",
+    "expected_evidence": [
+      [
+        "FileNotFoundError"
+      ],
+      [
+        "git-lfs"
+      ]
+    ],
+    "expected_analysis": [
+      [
+        "missing executable",
+        "tool is missing",
+        "git-lfs is not installed",
+        "PATH"
+      ],
+      [
+        "install git-lfs",
+        "check PATH",
+        "verify git-lfs",
+        "executable"
+      ]
+    ]
+  },
+  {
+    "id": "triage-020",
+    "category": "timeout",
+    "task": "Group the failures, identify directly supported likely causes, and give the next checks.",
+    "log": "ERROR calling upstream\\nhttpx.ReadTimeout: timed out after 10.0s requesting https://service.example/api/status\\nFAILED tests/test_upstream.py::test_status\\n",
+    "expected_evidence": [
+      [
+        "ReadTimeout"
+      ],
+      [
+        "10.0s"
+      ]
+    ],
+    "expected_analysis": [
+      [
+        "timeout",
+        "upstream latency",
+        "service slow",
+        "network latency"
+      ],
+      [
+        "check upstream",
+        "endpoint health",
+        "timeout setting",
+        "network"
+      ]
     ]
   }
 ]
