@@ -1,5 +1,6 @@
 import argparse
 import json
+import subprocess
 from pathlib import Path
 
 import gremlins.cli as cli
@@ -87,3 +88,60 @@ def test_install_script_bootstraps_core_only():
     assert "ollama" not in script.lower()
     assert " setup --profile " in script
     assert " deploy " not in script
+
+
+def test_direct_deterministic_cli_commands_work_without_provider(monkeypatch, tmp_path: Path, capsys):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=repo, check=True)
+    (repo / "sample.py").write_text("needle = 1\n", encoding="utf-8")
+    subprocess.run(["git", "add", "sample.py"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "add sample"], cwd=repo, check=True)
+
+    monkeypatch.setattr(cli, "resolve_repository", lambda *args, **kwargs: repo.resolve())
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("deterministic CLI must not call a model or client")
+
+    monkeypatch.setattr(cli, "_ensure_model", forbidden)
+    monkeypatch.setattr(cli, "_configure_claude", forbidden)
+    monkeypatch.setattr(cli, "_configure_codex", forbidden)
+
+    assert cli.run_repo_search(argparse.Namespace(
+        query="needle", repository=str(repo), scope="."
+    )) == 0
+    search = json.loads(capsys.readouterr().out)
+    assert search["matches"][0]["path"] == "sample.py"
+
+    assert cli.run_code_read(argparse.Namespace(
+        path="sample.py", repository=str(repo), start_line=1, line_count=20
+    )) == 0
+    read = json.loads(capsys.readouterr().out)
+    assert "needle = 1" in read["evidence"]["text"]
+
+    assert cli.run_git_history(argparse.Namespace(
+        repository=str(repo), path="sample.py", query=None
+    )) == 0
+    history = json.loads(capsys.readouterr().out)
+    assert history["history"]
+
+
+def test_optional_provider_setup_reports_unavailable_without_ollama(monkeypatch, capsys):
+    original_which = cli.shutil.which
+    monkeypatch.setattr(
+        cli.shutil,
+        "which",
+        lambda name: None if name == "ollama" else original_which(name),
+    )
+
+    rc = cli.provider_setup(argparse.Namespace(
+        provider="ollama", profile="mac-local", pull=False
+    ))
+    payload = json.loads(capsys.readouterr().out)
+
+    assert rc == 2
+    assert payload["provider"] == "ollama"
+    assert payload["available"] is False
+    assert payload["ok"] is False
