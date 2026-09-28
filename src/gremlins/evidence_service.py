@@ -126,7 +126,7 @@ def _variant_candidates(task: str, base_terms: Sequence[str], limit: int = 24) -
         if singular != word:
             candidates.append(singular)
 
-    for sequence in (words, normalized):
+    for sequence in (normalized, words):
         for width in (2, 3):
             for index in range(max(0, len(sequence) - width + 1)):
                 parts = sequence[index:index + width]
@@ -173,6 +173,85 @@ def _search_terms_for_path(path: str, hits: list[Evidence], search_terms: Sequen
     ]
 
 
+def _python_module_path(module: str, tracked: set[str]) -> str | None:
+    module = module.strip(".")
+    if module.startswith("gremlins."):
+        module = module[len("gremlins."):]
+    module = module.replace(".", "/")
+    candidates = [
+        f"src/gremlins/{module}.py",
+        f"src/gremlins/{module}/__init__.py",
+    ]
+    return next((path for path in candidates if path in tracked), None)
+
+
+def _python_neighbors(
+    repo: Path,
+    seed_paths: Sequence[str],
+    config: Config,
+    limit: int = 8,
+) -> list[str]:
+    tracked_list = _tracked_paths(repo, config)
+    tracked = set(tracked_list)
+    python_paths = [
+        path for path in tracked_list
+        if path.startswith("src/gremlins/") and path.endswith(".py")
+    ]
+    seed_modules = {
+        Path(path).stem
+        for path in seed_paths
+        if path.startswith("src/gremlins/") and path.endswith(".py")
+    }
+    neighbors: list[str] = []
+
+    # Forward local imports from the currently relevant files.
+    for path in seed_paths:
+        if path not in tracked or not path.endswith(".py"):
+            continue
+        try:
+            text = resolve_repo_file(repo, path).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for match in re.finditer(
+            r"^\s*from\s+(?:gremlins\.)?([A-Za-z_][A-Za-z0-9_.]*)\s+import\s+",
+            text,
+            re.MULTILINE,
+        ):
+            target = _python_module_path(match.group(1), tracked)
+            if target and target not in seed_paths and target not in neighbors:
+                neighbors.append(target)
+        for match in re.finditer(
+            r"^\s*from\s+\.([A-Za-z_][A-Za-z0-9_.]*)\s+import\s+",
+            text,
+            re.MULTILINE,
+        ):
+            target = _python_module_path(match.group(1), tracked)
+            if target and target not in seed_paths and target not in neighbors:
+                neighbors.append(target)
+
+    # Reverse local import edges: if a relevant module is used elsewhere, that
+    # importer is useful evidence for flow/caller questions.
+    for path in python_paths:
+        if path in seed_paths:
+            continue
+        try:
+            text = resolve_repo_file(repo, path).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for module in seed_modules:
+            patterns = (
+                rf"^\s*from\s+\.{re.escape(module)}\s+import\s+",
+                rf"^\s*from\s+gremlins\.{re.escape(module)}\s+import\s+",
+                rf"^\s*import\s+gremlins\.{re.escape(module)}\b",
+            )
+            if any(re.search(pattern, text, re.MULTILINE) for pattern in patterns):
+                if path not in neighbors:
+                    neighbors.append(path)
+                break
+
+    return neighbors[:limit]
+
+
 def _top_paths(
     repo: Path,
     evidence: list[Evidence],
@@ -199,49 +278,79 @@ def _top_paths(
     ]
     candidates = _dedupe(
         [*focused, *hits_by_path.keys(), *inventory_paths],
-        80,
+        120,
     )
 
-    def path_score(path: str) -> tuple[int, int, int, int, str]:
+    def base_score(path: str) -> tuple[int, int, int, int]:
         hits = hits_by_path.get(path, [])
         matched = _search_terms_for_path(path, hits, search_terms)
         low = path.lower()
         name = Path(low).name
         path_term_score = sum(
-            8 if term.lower() in name else 3
+            12 if term.lower() in name else 4
             for term in search_terms
             if term.lower() in low
         )
         return (
             1 if path in focused else 0,
-            len({term.lower() for term in matched}),
             path_term_score,
+            len({term.lower() for term in matched}),
             min(len(hits), 6),
-            path,
         )
 
-    ranked = sorted(
+    prelim = sorted(
         candidates,
         key=lambda path: (
-            -path_score(path)[0],
-            -path_score(path)[1],
-            -path_score(path)[2],
-            -path_score(path)[3],
+            -base_score(path)[0],
+            -base_score(path)[1],
+            -base_score(path)[2],
+            -base_score(path)[3],
             len(path),
             path,
         ),
     )
 
+    source_seeds = [path for path in prelim if _path_role(path) == "source"][:5]
+    structural = set(_python_neighbors(repo, source_seeds, config, limit=10))
+    for path in structural:
+        if path not in candidates:
+            candidates.append(path)
+
+    def sort_key(path: str) -> tuple:
+        focused_score, path_term_score, term_count, hit_count = base_score(path)
+        return (
+            -focused_score,
+            -(1 if path in structural else 0),
+            -path_term_score,
+            -term_count,
+            -hit_count,
+            len(path),
+            path,
+        )
+
+    ranked = sorted(candidates, key=sort_key)
     selected: list[str] = list(focused[:max_files])
-    # Preserve evidence diversity. The observation corpus repeatedly needed
-    # source + tests + docs/config in the same reasoning step; a single role
-    # must not crowd every other class out merely because it mentions more
-    # query words.
+
+    # First guarantee representation for each evidence role where candidates
+    # exist. Then grow the useful roles. This avoids both source-only packs and
+    # test/doc/config files crowding out the implementation.
+    for role in ("source", "test", "documentation", "configuration"):
+        if len(selected) >= max_files:
+            break
+        if any(_path_role(path) == role for path in selected):
+            continue
+        candidate = next(
+            (path for path in ranked if _path_role(path) == role and path not in selected),
+            None,
+        )
+        if candidate:
+            selected.append(candidate)
+
     role_targets = {
-        "source": 5,
-        "test": 1,
-        "documentation": 1,
-        "configuration": 1,
+        "source": 7,
+        "test": 2,
+        "documentation": 2,
+        "configuration": 2,
     }
     for role, target in role_targets.items():
         already = sum(_path_role(path) == role for path in selected)
@@ -485,7 +594,7 @@ def evidence_pack(
     started = time.monotonic()
     task = validate_task(task, config.limits.max_task_chars)
     repo = resolve_repository(repository, config)
-    max_files = max(1, min(int(max_files), 8))
+    max_files = max(1, min(int(max_files), 12))
 
     search_terms, matched_variants = _discovery_terms(
         repo, task, config, scope, terms, symbols
