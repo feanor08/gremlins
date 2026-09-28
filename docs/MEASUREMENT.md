@@ -159,9 +159,10 @@ The v1 corpus contains ten read-only software-engineering task families, includi
 The observation harness:
 
 - disables every Gremlins MCP tool for the run;
+- invokes Claude with `--setting-sources project` so user-level skills/settings do not bias delegation behavior;
 - allows Claude's Agent tool and does not instruct Claude to spawn agents;
 - asks Claude to use its normal workflow;
-- removes the benchmark corpus and Gremlins delegation/measurement reference docs from each isolated observation workspace;
+- removes the benchmark corpus plus Gremlins delegation/measurement/reference README/architecture docs from each isolated observation workspace;
 - records raw Claude stream JSON locally for audit;
 - captures every visible `Agent`/`Task` tool call, declared subagent type, delegated description/prompt, and parent tool-use metadata when exposed;
 - reports visible nested/sub-sub-agent calls when the Claude stream exposes parent relationships;
