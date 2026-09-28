@@ -691,7 +691,8 @@ def build_arm_prompt(
     else:
         instructions = (
             "This is benchmark arm C (Gremlins-assisted workflow). "
-            "You MUST call the Gremlins MCP tool mcp__gremlins__repo_explorer exactly once before any broad repository exploration. "
+            "You MUST call the Gremlins MCP repo_explorer tool exactly once before any broad repository exploration. "
+            "In Claude Code this tool is named mcp__gremlins__repo_explorer; in other MCP clients use the equivalent repo_explorer tool exposed by the Gremlins server. "
             "Do not call repo_explorer a second time. Use repo_explorer as the only Gremlins tool for this arm; do not call repo_search, code_read, git_history, status, or failure_triage. "
             "Choose a small set of exact terms and/or symbols yourself from the task; do not use broad repository search first. "
             f"Pass those terms/symbols, mode='auto', and measurement_tag='{tag}'. "

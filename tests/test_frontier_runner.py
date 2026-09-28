@@ -122,6 +122,23 @@ def test_commands_are_noninteractive_and_read_only(tmp_path: Path):
     assert "read-only" in codex
     assert str(tmp_path) in codex
 
+    codex_b = _codex_command(
+        "task",
+        tmp_path,
+        "model-y",
+        gremlins_mode="disabled",
+    )
+    assert "mcp_servers.gremlins.enabled=false" in codex_b
+
+    codex_c = _codex_command(
+        "task",
+        tmp_path,
+        "model-y",
+        gremlins_mode="repo-explorer-only",
+    )
+    assert "mcp_servers.gremlins.enabled=true" in codex_c
+    assert 'mcp_servers.gremlins.enabled_tools=["repo_explorer"]' in codex_c
+
 
 def test_structural_acceptance_and_redo_marker():
     accepted, missing_paths, missing_claims = _structural_acceptance(
@@ -270,6 +287,17 @@ def test_benchmark_source_must_be_clean(tmp_path: Path):
 def test_codex_arm_a_can_keep_normal_agent_setting(tmp_path: Path):
     codex = _codex_command("task", tmp_path, None, allow_agents=True)
     assert "agents.enabled=false" not in codex
+    assert "mcp_servers.gremlins.enabled=false" not in codex
+    assert "mcp_servers.gremlins.enabled=true" not in codex
+
+
+def test_codex_rejects_unknown_gremlins_mode(tmp_path: Path):
+    try:
+        _codex_command("task", tmp_path, None, gremlins_mode="unknown")
+    except ValueError as exc:
+        assert "gremlins_mode" in str(exc)
+    else:
+        raise AssertionError("unknown Gremlins treatment must fail closed")
 
 
 def test_c_arm_without_gremlins_call_is_invalid(monkeypatch, tmp_path: Path):

@@ -343,10 +343,29 @@ def _claude_command(
     return args
 
 
-def _codex_command(prompt: str, workspace: Path, model: str | None, allow_agents: bool = False) -> list[str]:
+def _codex_command(
+    prompt: str,
+    workspace: Path,
+    model: str | None,
+    allow_agents: bool = False,
+    gremlins_mode: str | None = None,
+) -> list[str]:
     args = ["codex"]
     if not allow_agents:
         args.extend(["-c", "agents.enabled=false"])
+
+    if gremlins_mode == "disabled":
+        args.extend(["-c", "mcp_servers.gremlins.enabled=false"])
+    elif gremlins_mode == "repo-explorer-only":
+        args.extend([
+            "-c",
+            "mcp_servers.gremlins.enabled=true",
+            "-c",
+            'mcp_servers.gremlins.enabled_tools=["repo_explorer"]',
+        ])
+    elif gremlins_mode is not None:
+        raise ValueError("gremlins_mode must be disabled, repo-explorer-only, or None")
+
     args.extend([
         "exec",
         "--json",
@@ -540,7 +559,18 @@ def run_frontier_case(
             permission_mode=("dontAsk" if arm in {"B", "C"} else "plan"),
         )
     else:
-        command = _codex_command(prompt, workspace, model, allow_agents=(arm == "A"))
+        codex_gremlins_mode = (
+            "disabled" if arm == "B"
+            else "repo-explorer-only" if arm == "C"
+            else None
+        )
+        command = _codex_command(
+            prompt,
+            workspace,
+            model,
+            allow_agents=(arm == "A"),
+            gremlins_mode=codex_gremlins_mode,
+        )
 
     run_env = None
     if client == "claude" and arm in {"B", "C"}:
