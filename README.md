@@ -147,6 +147,24 @@ uv run gremlins repo-explore \
   --mode auto
 ```
 
+### Mac reference setup
+
+For the first real local-model deployment, Gremlins uses an Apple-Silicon Mac as the reference environment:
+
+```bash
+./scripts/setup_mac_local_model.sh
+```
+
+The script keeps the model path explicit and optional: it installs Ollama through Homebrew when needed, starts the local service, prepares the caller-independent Gremlins core, pulls the configured `qwen3.5:4b` model, and verifies provider health. It does **not** make the local model a core dependency.
+
+After setup:
+
+```bash
+uv run gremlins benchmark model-value --repository . --worker all
+```
+
+This Mac result is the reference measurement before reproducing the same Gremlins contracts/configuration shape on THG nodes.
+
 ### Core installer and optional integrations
 
 `./install.sh` installs the Python environment and bootstraps the deterministic core only. It does not install or require Ollama, Claude Code, or Codex.
