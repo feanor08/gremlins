@@ -29,3 +29,16 @@ def test_evidence_service_benchmark_passes(monkeypatch, tmp_path: Path):
     assert report["pass"] is True
     assert report["summary"]["local_model_calls"] == 0
     assert report["summary"]["path_passed"] == 1
+
+
+def test_evidence_service_benchmark_cli_parses():
+    from gremlins.cli import build_parser, benchmark_evidence_service_cmd
+
+    args = build_parser().parse_args([
+        "benchmark",
+        "evidence-service",
+        "--repository",
+        ".",
+    ])
+    assert args.func is benchmark_evidence_service_cmd
+    assert args.repository == "."
