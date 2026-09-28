@@ -67,6 +67,34 @@ The configured reference model is currently `qwen3.5:4b` via the optional Ollama
 
 Normal CI remains model-free. The model-value benchmark is manual because it requires a real local model and machine-specific performance is part of what is being measured.
 
+### First Mac result — routing consequence
+
+The first real run used public main `7810291489f41ca566f83df95110d077d16cf4c7`, Ollama, and `qwen3.5:4b`.
+
+Repo explorer, 10 paired cases:
+
+- deterministic quality: 0.95;
+- model quality: 0.9833;
+- mean quality gain: +0.0333 (+3.33 percentage points), below the +0.10 materiality threshold;
+- deterministic median latency: 0.2411 s;
+- model median latency: 9.5233 s (~39.5x);
+- median result-size change: +33.92%.
+
+**Routing consequence:** normal repo exploration remains deterministic. Explicit model mode remains available for controlled experiments, not normal routing.
+
+Triage, 5 paired cases:
+
+- deterministic quality: 0.60;
+- model quality: 0.95;
+- mean quality gain: +0.35 (+35 percentage points);
+- model success/call rate: 100%;
+- model median latency: 4.9349 s;
+- median result-size change: +83.55%.
+
+The deterministic triage arm already preserved the relevant failure evidence; the measured gain came from grouping/explanation/next-check synthesis. Therefore Gremlins keeps deterministic evidence extraction as the first stage and permits bounded local-model synthesis for triage. This does not authorize Gremlins to replace Claude-level ambiguous debugging or architectural reasoning.
+
+The first full run used 15 model calls, 21,153 prompt-eval tokens, and 2,659 eval/output tokens. More triage cases/repeats are required before treating the observed +35 pp as a stable population estimate.
+
 It also does not answer whether Claude, Codex, or another coding client saves frontier work by using Gremlins. That remains the client-integration B/C experiment below.
 
 ## Client-integration measurement
