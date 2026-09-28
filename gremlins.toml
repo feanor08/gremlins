@@ -42,6 +42,7 @@ read_only = true
 "repo.search.literal" = "builtin-ripgrep"
 "code.read" = "builtin-source-reader"
 "git.history" = "builtin-git-history"
+"evidence.pack" = "builtin-evidence-pack"
 "worker.repo-explorer" = "repo-explorer"
 "worker.triage" = "triage"
 "model.evidence-extraction" = "ollama-default"
@@ -61,4 +62,8 @@ read_only = true
 
 [tools.builtin-git-history]
 provides = "git.history"
+read_only = true
+
+[tools.builtin-evidence-pack]
+provides = "evidence.pack"
 read_only = true
