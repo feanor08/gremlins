@@ -387,6 +387,7 @@ def _claude_command(
     allowed_tools: list[str] | None = None,
     disallowed_tools: list[str] | None = None,
     permission_mode: str = "plan",
+    setting_sources: str | None = None,
 ) -> list[str]:
     args = [
         "claude",
@@ -408,6 +409,8 @@ def _claude_command(
         args.extend(["--disallowedTools", *dict.fromkeys(denied)])
     if allowed_tools:
         args.extend(["--allowedTools", *allowed_tools])
+    if setting_sources:
+        args.extend(["--setting-sources", setting_sources])
     if model:
         args.extend(["--model", model])
     return args

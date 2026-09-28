@@ -122,6 +122,8 @@ def _prepare_observation_workspace(
             "!/skills/gremlins-delegation/",
             "!/docs/MEASUREMENT.md",
             "!/docs/MAC_REFERENCE.md",
+            "!/README.md",
+            "!/architecture.md",
         ],
         text=True,
         stdout=subprocess.PIPE,
@@ -138,8 +140,8 @@ def _observation_prompt(case: dict, workspace: Path) -> str:
         f"Repository: {workspace}\n"
         f"Task: {case['task']}\n\n"
         "Complete this read-only software-engineering task using your normal workflow. "
-        "Gremlins is unavailable for this task. Use Claude subagents only if you would "
-        "normally use them; do not spawn agents merely because this is an observation. "
+        "Use Claude subagents only if you would normally use them; do not spawn agents "
+        "merely because this is an observation. "
         "Do not modify files. Give a concise evidence-backed final answer."
     )
 
@@ -218,6 +220,7 @@ def run_claude_subagent_observation(
                 allow_agents=True,
                 disallowed_tools=gremlins_tools,
                 permission_mode="plan",
+                setting_sources="project",
             )
             started = time.monotonic()
             try:
@@ -325,7 +328,9 @@ def run_claude_subagent_observation(
         "interpretation": {
             "what_is_measured": (
                 "Observed parent Claude stream Agent/Task calls, their declared subagent type, "
-                "delegated prompt, and a transparent classification of the requested work."
+                "delegated prompt, and a transparent classification of the requested work. "
+                "Claude runs with project-only settings so user-level Gremlins delegation guidance "
+                "is not part of the observation treatment."
             ),
             "what_is_not_measured": (
                 "The report does not claim exact token/time shares inside each spawned subagent. "

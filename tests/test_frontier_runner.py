@@ -454,3 +454,14 @@ def test_parse_claude_stream_captures_subagent_details_and_parent_metadata():
     assert second["subagent_type"] == "Explore"
     assert second["parent_tool_use_id"] == "agent-1"
     assert second["observed_depth"] == 1
+
+
+def test_claude_command_can_isolate_setting_sources():
+    command = _claude_command(
+        "task",
+        None,
+        allow_agents=True,
+        setting_sources="project",
+    )
+    assert "--setting-sources" in command
+    assert command[command.index("--setting-sources") + 1] == "project"
