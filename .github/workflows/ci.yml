@@ -26,4 +26,5 @@ jobs:
       - run: uv run gremlins mcp-smoke
       - run: uv run gremlins eval
       - run: uv run gremlins benchmark capabilities --repository .
+      - run: uv run gremlins benchmark evidence-service --repository .
       - run: uv run gremlins benchmark pilot-local --repository .
