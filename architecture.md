@@ -144,6 +144,7 @@ repo.search.literal
 repo.retrieve.semantic
 code.read
 git.history
+evidence.pack
 log.extract.failures
 test.parse
 worker.repo-explorer
@@ -162,6 +163,7 @@ Example:
 "repo.search.literal" = "builtin-ripgrep"
 "code.read" = "builtin-source-reader"
 "git.history" = "builtin-git-history"
+"evidence.pack" = "builtin-evidence-pack"
 ```
 
 A future implementation can replace `builtin-ripgrep` without changing the workers that consume `repo.search.literal`.
@@ -172,6 +174,27 @@ For example:
 
 - literal search and semantic search are different capabilities;
 - a ranked semantic retriever must never silently replace an exact-search capability.
+
+### Evidence-pack boundary
+
+`evidence.pack` composes deterministic retrieval capabilities into one bounded, provenance-preserving evidence bundle: ranked source excerpts, test/source relationships, and bounded Git/change history. It is retrieval orchestration, not a reasoning worker.
+
+The measured frontier loop is intentionally iterative:
+
+```text
+caller hypothesis / question
+        |
+        v
+evidence.pack
+        |
+        v
+compact evidence
+        |
+        v
+caller reasoning / next question
+```
+
+The caller owns causal conclusions, architecture, trade-offs, and patch design. Repeated evidence-pack calls during RCA are expected when each call answers a narrower evidence question.
 
 ---
 
