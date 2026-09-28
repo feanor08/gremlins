@@ -177,6 +177,22 @@ Two different quantities matter:
 
 The report does **not** claim to know exact token/time percentages inside hidden subagent execution. A mixed call is a candidate to split—Gremlins can gather evidence while Claude retains reasoning—not a candidate for wholesale replacement. Nested calls are only measurable when Claude surfaces them in the parent stream.
 
+### Offline parent-retrieval analysis
+
+The observation run always saves raw Claude streams. Analyze those existing files without making another Claude call:
+
+```bash
+uv run gremlins benchmark analyze-claude-observation \
+  --study mac-claude-subagents-v1
+```
+
+This counts root/parent Claude tool activity separately from Agent calls and visible nested tool activity. It treats direct `Read`/`Grep`/`Glob`/search-style tools and read-only Git/shell inspection commands as evidence acquisition, reports the per-case tool-name mix, and includes terminal usage/cost even for max-turn results.
+
+This is intentionally an **offline** analysis. Running it consumes no Claude quota. Its purpose is to distinguish two savings opportunities:
+
+1. replacing spawned retrieval agents; and
+2. reducing direct parent-Claude retrieval loops during reasoning-heavy tasks such as RCA.
+
 ## Claude/Codex integration gate before THG
 
 THG deployment is intentionally paused until Gremlins is tested with both frontier clients on the Mac reference environment.

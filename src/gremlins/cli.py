@@ -20,7 +20,10 @@ from .mcpcheck import check_python_module, check_wrapper
 from .capability_benchmark import run_capability_benchmark
 from .model_value_benchmark import run_model_value_benchmark
 from .triage_stability_benchmark import run_triage_stability_benchmark
-from .subagent_observation import run_claude_subagent_observation
+from .subagent_observation import (
+    analyze_claude_observation_raw,
+    run_claude_subagent_observation,
+)
 from .benchmark import (
     BenchmarkRecord,
     Prices,
@@ -579,6 +582,19 @@ def benchmark_claude_subagents_cmd(args: argparse.Namespace) -> int:
     return 0
 
 
+def benchmark_analyze_claude_observation_cmd(args: argparse.Namespace) -> int:
+    try:
+        report = analyze_claude_observation_raw(
+            study=args.study,
+            raw_dir=args.raw_dir,
+        )
+    except RuntimeError as exc:
+        print(json.dumps({"analysis": "claude-observation-raw-v1", "error": str(exc)}, indent=2), file=sys.stderr)
+        return 2
+    print(json.dumps(report, indent=2))
+    return 0
+
+
 def benchmark_clear_cmd(args: argparse.Namespace) -> int:
     path = study_path(args.study)
     if path.exists():
@@ -808,6 +824,11 @@ def build_parser() -> argparse.ArgumentParser:
     bp.add_argument("--model")
     bp.add_argument("--timeout-seconds", type=int, default=900)
     bp.set_defaults(func=benchmark_claude_subagents_cmd)
+
+    bp = bench.add_parser("analyze-claude-observation", help="Analyze saved Claude observation streams without making new Claude calls")
+    bp.add_argument("--study", default="mac-claude-subagents-v1")
+    bp.add_argument("--raw-dir")
+    bp.set_defaults(func=benchmark_analyze_claude_observation_cmd)
 
     bp = bench.add_parser("clear", help="Clear a local benchmark study")
     bp.add_argument("--study", default="pilot")

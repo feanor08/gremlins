@@ -91,3 +91,57 @@ def test_observation_report_captures_agent_calls(monkeypatch, tmp_path: Path):
     assert report["summary"]["subagent_types"] == {"Explore": 1}
     assert report["summary"]["delegated_request_classes"]["evidence-acquisition"] == 1
     assert report["runs"][0]["subagents"][0]["prompt"] == "Search and locate provider state handling."
+
+
+def test_raw_analyzer_counts_direct_parent_evidence(monkeypatch, tmp_path: Path):
+    raw_dir = tmp_path / "raw"
+    raw_dir.mkdir()
+    stream = "\n".join([
+        '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"r1","name":"Read","input":{"file_path":"src/a.py"}},{"type":"tool_use","id":"a1","name":"Agent","input":{"subagent_type":"Explore","description":"find x","prompt":"search for x"}}]}}',
+        '{"type":"assistant","parent_tool_use_id":"a1","message":{"role":"assistant","content":[{"type":"tool_use","id":"g1","name":"Grep","input":{"pattern":"x"}}]}}',
+        '{"type":"result","subtype":"success","is_error":false,"num_turns":3,"total_cost_usd":0.12,"usage":{"input_tokens":2,"cache_creation_input_tokens":10,"cache_read_input_tokens":20,"output_tokens":5,"output_tokens_details":{"thinking_tokens":1}},"subagent_stats":{"spawned":1}}',
+    ])
+    (raw_dir / "obs-001-observe-r1.stdout.jsonl").write_text(stream, encoding="utf-8")
+    monkeypatch.setattr(observation, "load_observation_cases", lambda: [{
+        "id": "obs-001",
+        "family": "broad-discovery",
+    }])
+
+    report = observation.analyze_claude_observation_raw(
+        "study",
+        raw_dir=str(raw_dir),
+    )
+
+    assert report["summary"]["runs_analyzed"] == 1
+    assert report["summary"]["agent_calls_observed"] == 1
+    assert report["summary"]["subagents_reported_spawned"] == 1
+    assert report["summary"]["root_tool_calls"] == 2
+    assert report["summary"]["root_nonagent_tool_calls"] == 1
+    assert report["summary"]["direct_evidence_tool_calls"] == 1
+    assert report["summary"]["nested_tool_calls_visible"] == 1
+    assert report["summary"]["total_cost_usd"] == 0.12
+    assert report["cases"][0]["tool_activity"]["direct_evidence_tool_names"] == {"Read": 1}
+
+
+def test_raw_analyzer_includes_max_turn_results(monkeypatch, tmp_path: Path):
+    raw_dir = tmp_path / "raw"
+    raw_dir.mkdir()
+    stream = "\n".join([
+        '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"b1","name":"Bash","input":{"command":"git log --oneline -5"}}]}}',
+        '{"type":"result","subtype":"error_max_turns","terminal_reason":"max_turns","is_error":true,"num_turns":13,"total_cost_usd":0.5,"usage":{"input_tokens":3,"cache_creation_input_tokens":30,"cache_read_input_tokens":300,"output_tokens":20},"subagent_stats":{"spawned":0}}',
+    ])
+    (raw_dir / "obs-004-observe-r1.stdout.jsonl").write_text(stream, encoding="utf-8")
+    monkeypatch.setattr(observation, "load_observation_cases", lambda: [{
+        "id": "obs-004",
+        "family": "root-cause-investigation",
+    }])
+
+    report = observation.analyze_claude_observation_raw(
+        "study",
+        raw_dir=str(raw_dir),
+    )
+
+    assert report["summary"]["max_turn_results"] == 1
+    assert report["summary"]["successful_terminal_results"] == 0
+    assert report["summary"]["direct_evidence_tool_calls"] == 1
+    assert report["summary"]["runs_with_direct_evidence_and_no_agent"] == 1
