@@ -1,0 +1,67 @@
+[
+  {
+    "id": "triage-001",
+    "task": "Group the failures, identify directly supported likely causes, and give the next checks.",
+    "log": "ERROR collecting tests/test_api.py\nTraceback (most recent call last):\n  File \"tests/test_api.py\", line 3, in <module>\n    import httpx\nModuleNotFoundError: No module named 'httpx'\nFAILED tests/test_api.py - ModuleNotFoundError\n",
+    "expected_evidence": [
+      ["ModuleNotFoundError"],
+      ["httpx"]
+    ],
+    "expected_analysis": [
+      ["missing dependency", "dependency is missing", "missing package", "install httpx"],
+      ["dependency", "package"]
+    ]
+  },
+  {
+    "id": "triage-002",
+    "task": "Group the failures, identify directly supported likely causes, and give the next checks.",
+    "log": "ERROR test_model_chat\nPOST http://127.0.0.1:11434/api/chat\nurllib.error.URLError: <urlopen error [Errno 111] Connection refused>\nFAILED tests/test_provider.py::test_model_chat\n",
+    "expected_evidence": [
+      ["127.0.0.1:11434"],
+      ["Connection refused"]
+    ],
+    "expected_analysis": [
+      ["provider unavailable", "service is not running", "service unavailable", "provider is not running", "ollama"],
+      ["start the service", "check the service", "provider health", "verify the service"]
+    ]
+  },
+  {
+    "id": "triage-003",
+    "task": "Group the failures, identify directly supported likely causes, and give the next checks.",
+    "log": "ERROR writing test artifact\nOSError: [Errno 28] No space left on device: '/tmp/results.json'\nFAILED tests/test_export.py::test_write_artifact\n",
+    "expected_evidence": [
+      ["Errno 28"],
+      ["No space left on device"]
+    ],
+    "expected_analysis": [
+      ["disk space", "storage", "disk is full", "filesystem is full"],
+      ["free space", "disk usage", "clear space", "available space"]
+    ]
+  },
+  {
+    "id": "triage-004",
+    "task": "Group the failures, identify directly supported likely causes, and give the next checks.",
+    "log": "ERROR tests/test_auth.py::test_profile\nAssertionError: expected HTTP 200, got HTTP 401\nresponse body: {\"detail\":\"invalid token\"}\nFAILED tests/test_auth.py::test_profile\n",
+    "expected_evidence": [
+      ["HTTP 401"],
+      ["invalid token"]
+    ],
+    "expected_analysis": [
+      ["authentication", "credential", "authorization"],
+      ["token", "credentials"]
+    ]
+  },
+  {
+    "id": "triage-005",
+    "task": "Group the failures, identify directly supported likely causes, and give the next checks.",
+    "log": "ERROR worker startup\nTimeoutError: waited 30s for database connection pool\nretry 1 failed after 30s\nretry 2 failed after 30s\nFAILED tests/test_worker.py::test_startup\n",
+    "expected_evidence": [
+      ["TimeoutError"],
+      ["database connection pool"]
+    ],
+    "expected_analysis": [
+      ["database connectivity", "database connection", "database unavailable", "connection pool"],
+      ["check the database", "database health", "connectivity"]
+    ]
+  }
+]
