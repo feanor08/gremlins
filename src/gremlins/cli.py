@@ -17,6 +17,7 @@ from .workers import repo_explore, triage
 from .retrieval import git_history as _git_history, literal_search, read_excerpt, snapshot
 from .security import resolve_repository
 from .mcpcheck import check_python_module, check_wrapper
+from .capability_benchmark import run_capability_benchmark
 from .benchmark import (
     BenchmarkRecord,
     Prices,
@@ -516,6 +517,12 @@ def benchmark_pilot_local_cmd(args: argparse.Namespace) -> int:
     return 0 if report["failed"] == 0 else 1
 
 
+def benchmark_capabilities_cmd(args: argparse.Namespace) -> int:
+    report = run_capability_benchmark(args.repository)
+    print(json.dumps(report, indent=2))
+    return 0 if report["pass"] else 1
+
+
 def benchmark_clear_cmd(args: argparse.Namespace) -> int:
     path = study_path(args.study)
     if path.exists():
@@ -620,7 +627,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--limit", type=int, default=500)
     p.set_defaults(func=report_cmd)
 
-    p = sub.add_parser("benchmark", help="Record and compare A/B/C frontier-savings measurements")
+    p = sub.add_parser("benchmark", help="Run capability and optional client-integration measurements")
     bench = p.add_subparsers(dest="benchmark_command", required=True)
 
     bp = bench.add_parser("run", help="Run one controlled benchmark arm with installed Claude or Codex")
@@ -712,6 +719,10 @@ def build_parser() -> argparse.ArgumentParser:
     bp.add_argument("--repository", default=".")
     bp.add_argument("--case", dest="case_id", help="Run only one pilot case")
     bp.set_defaults(func=benchmark_pilot_local_cmd)
+
+    bp = bench.add_parser("capabilities", help="Run the caller-independent capability benchmark")
+    bp.add_argument("--repository", default=".")
+    bp.set_defaults(func=benchmark_capabilities_cmd)
 
     bp = bench.add_parser("clear", help="Clear a local benchmark study")
     bp.add_argument("--study", default="pilot")
