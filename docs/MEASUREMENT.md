@@ -6,16 +6,41 @@ Gremlins is caller-independent, so measurement has two layers.
 
 This is the product-level baseline and does not require an AI agent.
 
-Measure:
+The executable v1 gate is:
 
-- correctness and evidence coverage;
-- deterministic recall;
-- result size;
-- latency;
-- memory/CPU pressure;
-- security/path-policy behavior;
-- contract stability;
-- whether optional local inference adds value over deterministic execution.
+```bash
+gremlins benchmark capabilities --repository .
+```
+
+It runs from a clean Gremlins checkout and evaluates the bundled hidden-answer corpus from an isolated clone where `evals/` is removed from the searchable worktree.
+
+Capability Benchmark v1 measures:
+
+- exact-search expected-path coverage;
+- bounded source-read correctness around exact-search anchors;
+- bounded Git-history behavior;
+- deterministic repo-explorer expected-path coverage;
+- deterministic repo-explorer result-size compliance;
+- confirmation that deterministic repo exploration makes zero local-model calls;
+- deterministic failure/log evidence extraction;
+- path/scope/repository security-policy rejection;
+- core result-contract shape;
+- latency distributions;
+- process CPU use and peak RSS.
+
+### Capability Benchmark v1 gate
+
+The v1 command exits nonzero unless all correctness, policy, and contract probes pass, every deterministic repo-explorer case remains within its result budget, and local-model calls remain exactly zero.
+
+Latency, CPU time, and RSS are recorded but are **informational in v1**. They are intentionally not hard thresholds yet because GitHub-hosted runner variance would make those gates noisy. Once enough measurements exist, regression thresholds can be based on observed distributions rather than guesses.
+
+This gate is now part of normal macOS and Linux CI.
+
+### What v1 does not measure
+
+The capability gate does not answer whether local inference is useful. That is a separate deterministic-vs-model experiment.
+
+It also does not answer whether Claude, Codex, or another coding client saves frontier work by using Gremlins. That remains the client-integration B/C experiment below.
 
 ## Client-integration measurement
 
