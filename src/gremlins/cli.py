@@ -19,6 +19,7 @@ from .security import resolve_repository
 from .mcpcheck import check_python_module, check_wrapper
 from .capability_benchmark import run_capability_benchmark
 from .model_value_benchmark import run_model_value_benchmark
+from .triage_stability_benchmark import run_triage_stability_benchmark
 from .benchmark import (
     BenchmarkRecord,
     Prices,
@@ -540,6 +541,26 @@ def benchmark_model_value_cmd(args: argparse.Namespace) -> int:
     return 0
 
 
+def benchmark_triage_stability_cmd(args: argparse.Namespace) -> int:
+    try:
+        report = run_triage_stability_benchmark(
+            args.repository,
+            repeats=args.repeats,
+            case_ids=args.case,
+            min_mean_quality_gain=args.min_mean_quality_gain,
+            min_success_rate=args.min_success_rate,
+            min_case_model_quality=args.min_case_model_quality,
+            max_case_quality_span=args.max_case_quality_span,
+            min_stable_case_fraction=args.min_stable_case_fraction,
+            max_regressed_case_fraction=args.max_regressed_case_fraction,
+        )
+    except (RuntimeError, ValueError) as exc:
+        print(json.dumps({"benchmark": "triage-stability-v1", "error": str(exc)}, indent=2), file=sys.stderr)
+        return 2
+    print(json.dumps(report, indent=2))
+    return 0
+
+
 def benchmark_clear_cmd(args: argparse.Namespace) -> int:
     path = study_path(args.study)
     if path.exists():
@@ -748,6 +769,18 @@ def build_parser() -> argparse.ArgumentParser:
     bp.add_argument("--triage-case", action="append", help="Run only the selected triage case; repeatable")
     bp.add_argument("--min-quality-gain", type=float, default=0.10)
     bp.set_defaults(func=benchmark_model_value_cmd)
+
+    bp = bench.add_parser("triage-stability", help="Measure repeated local-model triage quality on the broader corpus")
+    bp.add_argument("--repository", default=".")
+    bp.add_argument("--repeats", type=int, default=3)
+    bp.add_argument("--case", action="append", help="Run only selected triage case; repeatable")
+    bp.add_argument("--min-mean-quality-gain", type=float, default=0.10)
+    bp.add_argument("--min-success-rate", type=float, default=0.95)
+    bp.add_argument("--min-case-model-quality", type=float, default=0.75)
+    bp.add_argument("--max-case-quality-span", type=float, default=0.25)
+    bp.add_argument("--min-stable-case-fraction", type=float, default=0.90)
+    bp.add_argument("--max-regressed-case-fraction", type=float, default=0.10)
+    bp.set_defaults(func=benchmark_triage_stability_cmd)
 
     bp = bench.add_parser("clear", help="Clear a local benchmark study")
     bp.add_argument("--study", default="pilot")

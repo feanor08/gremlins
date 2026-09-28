@@ -95,6 +95,31 @@ The deterministic triage arm already preserved the relevant failure evidence; th
 
 The first full run used 15 model calls, 21,153 prompt-eval tokens, and 2,659 eval/output tokens. More triage cases/repeats are required before treating the observed +35 pp as a stable population estimate.
 
+### Triage Stability Benchmark v1
+
+The follow-up benchmark expands triage to 20 directly-supported failure scenarios across dependency, service, storage, authentication, database, DNS, permissions, port conflict, TLS, configuration, filesystem, memory, assertion, schema, network, rate-limit, artifact-integrity, input-format, tooling, and timeout failures.
+
+Run three rounds on the Mac reference environment:
+
+```bash
+uv run gremlins benchmark triage-stability --repository . --repeats 3
+```
+
+That is 60 local-model calls. The command rotates the case order between rounds and reports:
+
+- deterministic baseline quality;
+- mean/min/max local-model quality per case;
+- per-case quality span and standard deviation;
+- mean quality gain;
+- model success rate;
+- stable-case fraction;
+- quality-floor fraction;
+- regression-case fraction;
+- median and p95 local-model latency;
+- prompt-eval and output-token totals.
+
+The default stability signal requires at least +10 percentage points mean quality gain, 95% model success, at least 90% stable cases, at least 90% of cases meeting a 0.75 mean model-quality floor, and no more than 10% of cases regressing versus their deterministic baseline. These are bounded engineering thresholds for this experiment, not universal model truths.
+
 It also does not answer whether Claude, Codex, or another coding client saves frontier work by using Gremlins. That remains the client-integration B/C experiment below.
 
 ## Client-integration measurement
