@@ -13,6 +13,7 @@ from typing import Any
 from .benchmark import benchmark_root
 from .frontier_runner import (
     _claude_command,
+    _claude_tool_uses,
     _ensure_clean_git_repository,
     _ensure_frontier_client_ready,
     _parse_claude_stream,
@@ -345,6 +346,287 @@ def run_claude_subagent_observation(
     }
 
     output_path = benchmark_root() / f"{study}.subagents.json"
+    output_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    report["report_file"] = str(output_path)
+    return report
+
+
+READ_ONLY_TOOL_NAMES = {
+    "read",
+    "grep",
+    "glob",
+    "search",
+    "find",
+    "toolsearch",
+    "websearch",
+    "webfetch",
+    "ls",
+}
+READ_ONLY_BASH_RE = re.compile(
+    r"(?:^|[;&|()]\s*)(?:rg|grep|find|ls|cat|sed|head|tail|wc|tree)\b"
+    r"|(?:^|[;&|()]\s*)git\s+(?:log|show|blame|diff|status|grep|rev-parse)\b",
+    re.IGNORECASE,
+)
+
+
+def _load_raw_events(path: Path) -> list[dict]:
+    events: list[dict] = []
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(event, dict):
+            events.append(event)
+    return events
+
+
+def _root_tool_category(use: dict) -> str:
+    name = str(use.get("name") or "").lower()
+    if name in {"agent", "task"}:
+        return "subagent"
+    if use.get("parent_tool_use_id"):
+        return "nested"
+    if name in READ_ONLY_TOOL_NAMES:
+        return "direct-evidence"
+    if name == "bash":
+        payload = use.get("input") if isinstance(use.get("input"), dict) else {}
+        command = str(payload.get("command") or "")
+        if READ_ONLY_BASH_RE.search(command):
+            return "direct-evidence"
+    return "other"
+
+
+def _tool_preview(use: dict) -> str | None:
+    payload = use.get("input") if isinstance(use.get("input"), dict) else {}
+    for key in ("command", "pattern", "query", "file_path", "path"):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            compact = " ".join(value.strip().split())
+            return compact[:300]
+    return None
+
+
+def analyze_claude_observation_raw(
+    study: str = "mac-claude-subagents-v1",
+    *,
+    raw_dir: str | None = None,
+) -> dict:
+    directory = (
+        Path(raw_dir).expanduser().resolve()
+        if raw_dir
+        else benchmark_root() / "raw" / study
+    )
+    if not directory.is_dir():
+        raise RuntimeError(f"raw observation directory does not exist: {directory}")
+
+    case_family = {
+        str(case.get("id")): str(case.get("family") or "unknown")
+        for case in load_observation_cases()
+    }
+    files = sorted(directory.glob("*.stdout.jsonl"))
+    if not files:
+        raise RuntimeError(f"no Claude raw stdout JSONL files found in {directory}")
+
+    cases: list[dict] = []
+    root_names: Counter[str] = Counter()
+    evidence_names: Counter[str] = Counter()
+    nested_names: Counter[str] = Counter()
+    total_usage = {
+        "input_tokens": 0,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "output_tokens": 0,
+        "thinking_tokens": 0,
+    }
+    total_cost = 0.0
+    cost_known = 0
+    total_root_tools = 0
+    total_root_nonagent = 0
+    total_direct_evidence = 0
+    total_agent_calls = 0
+    total_nested = 0
+    reported_spawned = 0
+    max_turn_results = 0
+    successful_results = 0
+
+    filename_re = re.compile(r"^(obs-\d+)-observe-r(\d+)\.stdout\.jsonl$")
+
+    for path in files:
+        match = filename_re.match(path.name)
+        case_id = match.group(1) if match else path.stem
+        iteration = int(match.group(2)) if match else 1
+        events = _load_raw_events(path)
+        final = next(
+            (event for event in reversed(events) if event.get("type") == "result"),
+            {},
+        )
+        uses = _claude_tool_uses(events)
+
+        root_uses = [use for use in uses if not use.get("parent_tool_use_id")]
+        nested_uses = [use for use in uses if use.get("parent_tool_use_id")]
+        agent_uses = [
+            use for use in uses
+            if str(use.get("name") or "").lower() in {"agent", "task"}
+        ]
+        root_nonagent = [
+            use for use in root_uses
+            if str(use.get("name") or "").lower() not in {"agent", "task"}
+        ]
+        direct_evidence = [
+            use for use in root_nonagent
+            if _root_tool_category(use) == "direct-evidence"
+        ]
+
+        root_names.update(str(use.get("name") or "unknown") for use in root_uses)
+        evidence_names.update(str(use.get("name") or "unknown") for use in direct_evidence)
+        nested_names.update(str(use.get("name") or "unknown") for use in nested_uses)
+
+        usage = final.get("usage") if isinstance(final.get("usage"), dict) else {}
+        thinking = (
+            usage.get("output_tokens_details")
+            if isinstance(usage.get("output_tokens_details"), dict)
+            else {}
+        )
+        normalized_usage = {
+            "input_tokens": int(usage.get("input_tokens") or 0),
+            "cache_creation_input_tokens": int(usage.get("cache_creation_input_tokens") or 0),
+            "cache_read_input_tokens": int(usage.get("cache_read_input_tokens") or 0),
+            "output_tokens": int(usage.get("output_tokens") or 0),
+            "thinking_tokens": int(thinking.get("thinking_tokens") or 0),
+        }
+        for key, value in normalized_usage.items():
+            total_usage[key] += value
+
+        cost = final.get("total_cost_usd")
+        try:
+            cost_value = float(cost) if cost is not None else None
+        except (TypeError, ValueError):
+            cost_value = None
+        if cost_value is not None:
+            total_cost += cost_value
+            cost_known += 1
+
+        subtype = final.get("subtype")
+        terminal_reason = final.get("terminal_reason")
+        is_error = bool(final.get("is_error"))
+        if subtype == "error_max_turns" or terminal_reason == "max_turns":
+            max_turn_results += 1
+        elif final and not is_error:
+            successful_results += 1
+
+        subagent_stats = (
+            final.get("subagent_stats")
+            if isinstance(final.get("subagent_stats"), dict)
+            else {}
+        )
+        reported_spawned += int(subagent_stats.get("spawned") or 0)
+
+        total_root_tools += len(root_uses)
+        total_root_nonagent += len(root_nonagent)
+        total_direct_evidence += len(direct_evidence)
+        total_agent_calls += len(agent_uses)
+        total_nested += len(nested_uses)
+
+        cases.append({
+            "case_id": case_id,
+            "family": case_family.get(case_id, "unknown"),
+            "iteration": iteration,
+            "result": {
+                "subtype": subtype,
+                "terminal_reason": terminal_reason,
+                "is_error": is_error,
+                "num_turns": final.get("num_turns"),
+                "cost_usd": cost_value,
+                "usage": normalized_usage,
+                "reported_subagent_stats": subagent_stats,
+            },
+            "tool_activity": {
+                "root_tool_calls": len(root_uses),
+                "root_nonagent_tool_calls": len(root_nonagent),
+                "direct_evidence_tool_calls": len(direct_evidence),
+                "direct_evidence_fraction_of_root_nonagent": (
+                    round(len(direct_evidence) / len(root_nonagent), 4)
+                    if root_nonagent else None
+                ),
+                "agent_calls": len(agent_uses),
+                "nested_tool_calls": len(nested_uses),
+                "root_tool_names": dict(Counter(
+                    str(use.get("name") or "unknown") for use in root_uses
+                )),
+                "direct_evidence_tool_names": dict(Counter(
+                    str(use.get("name") or "unknown") for use in direct_evidence
+                )),
+                "nested_tool_names": dict(Counter(
+                    str(use.get("name") or "unknown") for use in nested_uses
+                )),
+                "direct_evidence_previews": [
+                    {
+                        "name": use.get("name"),
+                        "preview": _tool_preview(use),
+                    }
+                    for use in direct_evidence
+                ],
+            },
+            "raw_file": str(path),
+        })
+
+    runs_with_agents = sum(case["tool_activity"]["agent_calls"] > 0 for case in cases)
+    direct_evidence_no_agent = sum(
+        case["tool_activity"]["direct_evidence_tool_calls"] > 0
+        and case["tool_activity"]["agent_calls"] == 0
+        for case in cases
+    )
+
+    report = {
+        "analysis": "claude-observation-raw-v1",
+        "study": study,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "raw_directory": str(directory),
+        "summary": {
+            "runs_analyzed": len(cases),
+            "successful_terminal_results": successful_results,
+            "max_turn_results": max_turn_results,
+            "runs_with_agents": runs_with_agents,
+            "agent_calls_observed": total_agent_calls,
+            "subagents_reported_spawned": reported_spawned,
+            "nested_tool_calls_visible": total_nested,
+            "root_tool_calls": total_root_tools,
+            "root_nonagent_tool_calls": total_root_nonagent,
+            "direct_evidence_tool_calls": total_direct_evidence,
+            "direct_evidence_fraction_of_root_nonagent": (
+                round(total_direct_evidence / total_root_nonagent, 4)
+                if total_root_nonagent else None
+            ),
+            "runs_with_direct_evidence_and_no_agent": direct_evidence_no_agent,
+            "total_cost_usd": round(total_cost, 6) if cost_known else None,
+            "cost_known_runs": cost_known,
+            "usage": total_usage,
+            "root_tool_names": dict(root_names),
+            "direct_evidence_tool_names": dict(evidence_names),
+            "nested_tool_names": dict(nested_names),
+        },
+        "cases": cases,
+        "interpretation": {
+            "direct_evidence": (
+                "Root-level Read/Grep/Glob/Search/Find/ToolSearch/WebSearch/WebFetch/ls "
+                "plus read-only shell evidence commands such as rg/grep/find/ls/cat/sed/head/"
+                "tail/wc/tree and git log/show/blame/diff/status/grep/rev-parse."
+            ),
+            "boundary": (
+                "This analysis measures visible frontier tool activity from already-recorded "
+                "Claude streams. It does not infer that all non-tool tokens are reasoning, and "
+                "it does not claim hidden nested work that Claude did not emit."
+            ),
+            "product_use": (
+                "High direct-evidence activity without Agent calls supports using Gremlins as "
+                "an evidence service inside the parent Claude reasoning loop, not only as a "
+                "replacement for spawned Explore agents."
+            ),
+        },
+    }
+
+    output_path = benchmark_root() / f"{study}.retrieval-analysis.json"
     output_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     report["report_file"] = str(output_path)
     return report
