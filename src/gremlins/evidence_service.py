@@ -386,7 +386,7 @@ def _related_path_index(
     search_terms: Sequence[str],
     selected_paths: Sequence[str],
     config: Config,
-    limit: int = 24,
+    limit: int = 32,
 ) -> list[dict]:
     hits_by_path: dict[str, list[Evidence]] = defaultdict(list)
     for item in evidence:
@@ -401,17 +401,38 @@ def _related_path_index(
             limit=12,
         )
     )
+    tracked = _tracked_paths(repo, config)
+
+    # Test/source filename affinity is cheap, deterministic, and was a common
+    # manual Claude lookup in the observation corpus. Include candidate tests
+    # even when the detailed file slots are already full.
+    affine_tests: list[str] = []
+    source_basis = [
+        path for path in [*selected_paths, *structural]
+        if _path_role(path) == "source"
+    ]
+    for source in source_basis:
+        stem = Path(source).stem.lower()
+        if stem == "__init__":
+            stem = Path(source).parent.name.lower()
+        if len(stem) < 3:
+            continue
+        for path in tracked:
+            if _is_test_path(path) and stem in Path(path).name.lower():
+                if path not in affine_tests:
+                    affine_tests.append(path)
+
     inventory = [
         item.path for item in path_inventory(repo, search_terms, config)
         if item.path and (repo / item.path).is_file()
     ]
     candidates = _dedupe(
-        [*selected_paths, *structural, *hits_by_path.keys(), *inventory],
-        100,
+        [*selected_paths, *structural, *affine_tests, *hits_by_path.keys(), *inventory],
+        140,
     )
     selected_rank = {path: index for index, path in enumerate(selected_paths)}
 
-    def score(path: str) -> tuple[int, int, int, int, int, str]:
+    def score(path: str) -> tuple[int, int, int, int, int, int]:
         hits = hits_by_path.get(path, [])
         matched = _search_terms_for_path(path, hits, search_terms)
         low = path.lower()
@@ -424,10 +445,10 @@ def _related_path_index(
         return (
             1 if path in selected_rank else 0,
             1 if path in structural else 0,
+            1 if path in affine_tests else 0,
             path_term_score,
             len({term.lower() for term in matched}),
             min(len(hits), 6),
-            path,
         )
 
     ranked = sorted(
@@ -438,17 +459,54 @@ def _related_path_index(
             -score(path)[2],
             -score(path)[3],
             -score(path)[4],
+            -score(path)[5],
             len(path),
             path,
         ),
     )
+
+    chosen: list[str] = []
+
+    def add(path: str) -> None:
+        if path not in chosen and len(chosen) < limit:
+            chosen.append(path)
+
+    for path in selected_paths:
+        add(path)
+    for path in affine_tests:
+        add(path)
+
+    # Preserve breadth in the compact path-only index. These entries are cheap
+    # and let the caller focus the next evidence request without repeating a
+    # broad frontier search.
+    role_targets = {
+        "source": 16,
+        "test": 6,
+        "documentation": 5,
+        "configuration": 4,
+    }
+    for role, target in role_targets.items():
+        count = sum(_path_role(path) == role for path in chosen)
+        for path in ranked:
+            if len(chosen) >= limit or count >= target:
+                break
+            if path in chosen or _path_role(path) != role:
+                continue
+            add(path)
+            count += 1
+
+    for path in ranked:
+        add(path)
+        if len(chosen) >= limit:
+            break
+
     return [
         {
             "path": path,
             "role": _path_role(path),
             "detailed": path in selected_rank,
         }
-        for path in ranked[:limit]
+        for path in chosen
     ]
 
 
