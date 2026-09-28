@@ -44,6 +44,7 @@ Current capabilities include:
 - exact read-only repository search (`repo-search`);
 - bounded source excerpts (`code-read`);
 - bounded Git history (`git-history`);
+- deterministic cross-source evidence packs (`evidence-pack`) with ranked source excerpts, test/source relationships, and bounded change history;
 - ranked multi-term repository exploration;
 - failure/log triage;
 - path and repository security checks;
@@ -52,6 +53,12 @@ Current capabilities include:
 - optional local-model synthesis.
 
 The local model is **optional to the architecture**. Deterministic capabilities should work without inference whenever inference is unnecessary.
+
+### Evidence-engine boundary
+
+A Mac observation of normal Claude Code work found that **128 of 139 root non-Agent tool calls (92.1%) were direct evidence gathering**, while only two Agent calls were spawned across ten tasks. Gremlins therefore treats evidence acquisition—not subagent replacement—as the primary frontier-offload boundary.
+
+During RCA, architecture, or debugging, the caller keeps hypotheses, causal reasoning, and judgment. `evidence-pack` may be called repeatedly to gather compact source, test, and Git/change evidence for the caller's next reasoning step.
 
 ### Measured model-routing policy
 
@@ -72,6 +79,10 @@ Repo-explorer local synthesis improved mean quality only from 0.95 to 0.9833 (+3
 Gremlins capabilities are directly callable from the terminal or another process:
 
 ```bash
+uv run gremlins evidence-pack \
+  "Find the implementation, relevant tests, and recent changes for RetryExhaustedError" \
+  --repository /path/to/repo
+
 uv run gremlins repo-explore \
   "Find references to RetryExhaustedError" \
   --repository /path/to/repo \
@@ -140,6 +151,7 @@ Run deterministic validation:
 uv run pytest -q
 uv run gremlins eval
 uv run gremlins benchmark capabilities --repository .
+uv run gremlins benchmark evidence-service --repository .
 uv run gremlins benchmark pilot-local --repository .
 ```
 
@@ -151,6 +163,7 @@ Run capabilities directly:
 uv run gremlins repo-search RetryExhaustedError --repository .
 uv run gremlins code-read src/gremlins/workers.py --repository . --start-line 1 --line-count 80
 uv run gremlins git-history --repository . --path src/gremlins/workers.py
+uv run gremlins evidence-pack "Trace worker status handling and relevant tests" --repository .
 
 uv run gremlins repo-explore \
   "Find the provider configuration" \
