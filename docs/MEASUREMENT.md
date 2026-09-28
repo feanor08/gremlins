@@ -143,6 +143,52 @@ The benchmark returned `stable_material_value=true` with no failed stability rea
 
 It also does not answer whether Claude, Codex, or another coding client saves frontier work by using Gremlins. That remains the client-integration B/C experiment below.
 
+## Claude/Codex integration gate before THG
+
+THG deployment is intentionally paused until Gremlins is tested with both frontier clients on the Mac reference environment.
+
+For each client, run a separate provenance-locked study with `--include-a`:
+
+- **A — normal client workflow:** Gremlins is forbidden; the client's normal subagent/multi-agent behavior is allowed.
+- **B — tuned frontier-only:** Gremlins is hard-disabled and subagents are disabled.
+- **C — Gremlins-assisted:** subagents are disabled; the client must make exactly one deterministic Gremlins `repo_explorer` call before broad retrieval.
+
+The product gate is still **B vs C**. Arm A is diagnostic: it shows how much the client's normal agent/subagent-heavy workflow costs relative to a disciplined baseline.
+
+Claude enforcement uses the CLI tool allow/deny surface. Codex enforcement uses per-run config overrides: arm B sets `mcp_servers.gremlins.enabled=false`; arm C enables the Gremlins MCP server and restricts it to `repo_explorer`. Both B and C disable client subagents.
+
+Run one breadth-first pass first:
+
+```bash
+uv run gremlins benchmark suite \
+  --study mac-claude-abc-v1 \
+  --repository . \
+  --client claude \
+  --include-a \
+  --repeats 1
+
+uv run gremlins benchmark suite \
+  --study mac-codex-abc-v1 \
+  --repository . \
+  --client codex \
+  --include-a \
+  --repeats 1
+```
+
+Then inspect:
+
+```bash
+uv run gremlins benchmark report --study mac-claude-abc-v1
+uv run gremlins benchmark gate --study mac-claude-abc-v1
+
+uv run gremlins benchmark report --study mac-codex-abc-v1
+uv run gremlins benchmark gate --study mac-codex-abc-v1
+```
+
+If a client is close to the gate or results are noisy, repeat the same study with `--repeats 2`; the suite resumes the missing second iteration without discarding the first.
+
+Do not compare Claude's absolute token counts directly with Codex's as if their accounting semantics were identical. The primary decision is within-client B→C reduction and quality preservation, with A providing client-specific normal-workflow context.
+
 ## Client-integration measurement
 
 The existing A/B/C harness is an integration experiment for frontier coding agents.
