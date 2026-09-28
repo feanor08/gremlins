@@ -180,8 +180,6 @@ def run_capability_benchmark(repository: str = ".") -> dict:
         first_history: Evidence | None = None
         first_explorer: dict | None = None
 
-        case_hits: dict[str, list[Evidence]] = {}
-
         for case in cases:
             case_id = str(case.get("id"))
             terms = [
@@ -204,7 +202,6 @@ def run_capability_benchmark(repository: str = ".") -> dict:
 
             hits, elapsed = _timed(run_search_case)
             search_latencies.append(elapsed)
-            case_hits[case_id] = hits
             if hits and first_search is None:
                 first_search = hits[0]
             returned_paths = {item.path for item in hits}
@@ -444,6 +441,11 @@ def run_capability_benchmark(repository: str = ".") -> dict:
         "benchmark": "capabilities-v1",
         "repository": repository,
         "source_head": source_state["head"],
+        "environment": {
+            "system": platform.system(),
+            "machine": platform.machine(),
+            "python": platform.python_version(),
+        },
         "pass": overall_pass,
         "summary": {
             "capabilities": len(capabilities),
@@ -465,7 +467,7 @@ def run_capability_benchmark(repository: str = ".") -> dict:
         "requirements": {
             "ai_client_required": False,
             "local_model_required": False,
-            "mcp_required": False,
+            "mcp_interface_required": False,
             "all_correctness_policy_contract_probes_must_pass": True,
             "local_model_calls_must_equal": 0,
             "repo_explore_result_budget_chars": deterministic_budget,
