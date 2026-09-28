@@ -85,6 +85,11 @@ def run_evidence_service_benchmark(repository: str = ".") -> dict:
                 for item in result.get("files", [])
                 if isinstance(item, dict)
             }
+            returned_paths.update(
+                str(item.get("path"))
+                for item in result.get("related_paths", [])
+                if isinstance(item, dict) and item.get("path")
+            )
             for relation in result.get("relationships", []):
                 if isinstance(relation, dict):
                     returned_paths.add(str(relation.get("source")))
