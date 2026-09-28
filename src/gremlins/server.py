@@ -5,6 +5,7 @@ from mcp.server import MCPServer
 from .config import load_config
 from .provider import ProviderError, health
 from .retrieval import git_history as _git_history, literal_search, read_excerpt, snapshot
+from .evidence_service import evidence_pack as _evidence_pack
 from .security import PolicyError, resolve_repository, resolve_repo_file
 from .workers import repo_explore, triage
 
@@ -12,8 +13,8 @@ from .workers import repo_explore, triage
 mcp = MCPServer(
     "Gremlins",
     instructions=(
-        "Use Gremlins for cheap read-only repository exploration, exact search, Git history, and failure triage. "
-        "Prefer these tools before repeating mechanical evidence gathering in the caller. "
+        "Use Gremlins as a cheap read-only evidence engine for repository exploration, exact search, bounded reads, Git history, test/source relationships, and failure triage. "
+        "Prefer evidence_pack when the caller would otherwise perform several search/read/history hops, including during root-cause analysis. "
         "Gremlins never modifies repositories and its local workers cannot spawn child workers."
     ),
 )
@@ -60,6 +61,35 @@ def git_history(repository: str = ".", path: str | None = None, query: str | Non
     repo = resolve_repository(repository, config)
     items = _git_history(repo, config, path=path, query=query)
     return {"snapshot": snapshot(repo, config), "history": [x.as_dict() for x in items]}
+
+
+@mcp.tool()
+def evidence_pack(
+    task: str,
+    repository: str = ".",
+    scope: str = ".",
+    terms: list[str] | None = None,
+    symbols: list[str] | None = None,
+    paths: list[str] | None = None,
+    include_tests: bool = True,
+    include_history: bool = True,
+    max_files: int = 6,
+    measurement_tag: str | None = None,
+) -> dict:
+    """Deterministic evidence bundle for multi-hop investigation. Call repeatedly during RCA; Gremlins gathers evidence while the caller keeps causal reasoning and judgment."""
+    return _evidence_pack(
+        repository,
+        task,
+        load_config(),
+        scope=scope,
+        terms=terms,
+        symbols=symbols,
+        paths=paths,
+        include_tests=include_tests,
+        include_history=include_history,
+        max_files=max_files,
+        measurement_tag=measurement_tag,
+    )
 
 
 @mcp.tool()
