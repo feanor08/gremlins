@@ -77,7 +77,7 @@ def run_evidence_service_benchmark(repository: str = ".") -> dict:
 
         for case in cases:
             case_started = time.perf_counter()
-            result = evidence_pack(str(workspace), str(case["task"]), config, max_files=8)
+            result = evidence_pack(str(workspace), str(case["task"]), config, max_files=12)
             elapsed_ms = (time.perf_counter() - case_started) * 1000.0
 
             returned_paths = {
