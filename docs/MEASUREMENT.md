@@ -93,7 +93,7 @@ Triage, 5 paired cases:
 
 The deterministic triage arm already preserved the relevant failure evidence; the measured gain came from grouping/explanation/next-check synthesis. Therefore Gremlins keeps deterministic evidence extraction as the first stage and permits bounded local-model synthesis for triage. This does not authorize Gremlins to replace Claude-level ambiguous debugging or architectural reasoning.
 
-The first full run used 15 model calls, 21,153 prompt-eval tokens, and 2,659 eval/output tokens. More triage cases/repeats are required before treating the observed +35 pp as a stable population estimate.
+The first full run used 15 model calls, 21,153 prompt-eval tokens, and 2,659 eval/output tokens. That result was followed by the broader repeated stability study below.
 
 ### Triage Stability Benchmark v1
 
@@ -119,6 +119,27 @@ That is 60 local-model calls. The command rotates the case order between rounds 
 - prompt-eval and output-token totals.
 
 The default stability signal requires at least +10 percentage points mean quality gain, 95% model success, at least 90% stable cases, at least 90% of cases meeting a 0.75 mean model-quality floor, and no more than 10% of cases regressing versus their deterministic baseline. These are bounded engineering thresholds for this experiment, not universal model truths.
+
+
+#### Mac reference result — PASS
+
+On public main `43a3ac29bae189719395cd954e58b03fab847763` with Ollama + `qwen3.5:4b`, the 20-case × 3-repeat study produced:
+
+- deterministic mean quality: 0.6375;
+- local-model mean quality: 0.9167;
+- mean quality gain: +0.2792 (+27.92 percentage points);
+- model success: 60/60 calls (100%);
+- stable cases: 20/20 (100%);
+- cases at or above the 0.75 mean model-quality floor: 19/20 (95%);
+- regressed cases versus deterministic: 0/20;
+- median local-model latency: 5.2553 s;
+- p95 local-model latency: 7.315 s;
+- prompt-eval tokens: 14,955;
+- eval/output tokens: 9,921.
+
+The benchmark returned `stable_material_value=true` with no failed stability reasons. The only below-floor case was the local-service connection-refused case at 0.6667 mean model quality; it still improved over its 0.50 deterministic baseline and remained within the configured repeat-variation bound.
+
+**Reference decision:** the Mac profile keeps deterministic failure-evidence extraction as stage one and uses local `qwen3.5:4b` synthesis for bounded failure grouping, directly-supported likely-cause explanation, and next-check suggestions. This does not extend Gremlins into ambiguous root-cause debugging or other Claude-level reasoning.
 
 It also does not answer whether Claude, Codex, or another coding client saves frontier work by using Gremlins. That remains the client-integration B/C experiment below.
 

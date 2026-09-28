@@ -1708,14 +1708,14 @@ Retrieval finds the evidence needed for the measured task set with lower frontie
 
 ## Workstream F — benchmark model value and provider alternatives
 
-**Status:** first Mac model-value measurement completed. A provisional per-worker routing decision now exists.
+**Status:** Mac reference model-value measurement completed and the per-worker routing decision is frozen for the reference profile.
 
 Current measured routing:
 - repo exploration stays deterministic in normal operation; local synthesis did not meet the materiality threshold;
 - bounded triage keeps deterministic evidence extraction and may use the local model for grouping/explanation/next checks;
 - Claude-level ambiguous debugging, architecture, trade-offs, patch design, and subtle review are explicitly outside this local-worker optimization.
 
-The first result is a routing decision for the measured corpus, not a claim that one model/runtime is universally best.
+The broader triage stability study (20 categories × 3 repeats) confirmed the triage decision: +27.92 percentage points mean quality, 60/60 successful model calls, 20/20 stable cases, 19/20 cases above the quality floor, and zero regressions. This is the Mac reference behavior to reproduce on THG. It is still not a claim that one model/runtime is universally best.
 
 ### Goals
 
