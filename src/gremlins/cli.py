@@ -14,12 +14,14 @@ from .config import load_config, project_root
 from .provider import ProviderError, health
 from .deployment import stack_lock_path, write_stack_lock
 from .workers import repo_explore, triage
+from .evidence_service import evidence_pack
 from .retrieval import git_history as _git_history, literal_search, read_excerpt, snapshot
 from .security import resolve_repository
 from .mcpcheck import check_python_module, check_wrapper
 from .capability_benchmark import run_capability_benchmark
 from .model_value_benchmark import run_model_value_benchmark
 from .triage_stability_benchmark import run_triage_stability_benchmark
+from .evidence_service_benchmark import run_evidence_service_benchmark
 from .subagent_observation import (
     analyze_claude_observation_raw,
     run_claude_subagent_observation,
@@ -295,6 +297,7 @@ def doctor(_: argparse.Namespace) -> int:
         "repo-search-literal": {"available": core_ok, "requires_model": False},
         "code-read": {"available": core_ok, "requires_model": False},
         "git-history": {"available": core_ok, "requires_model": False},
+        "evidence-pack": {"available": core_ok, "requires_model": False},
     }
 
     checks = {
@@ -342,6 +345,26 @@ def run_git_history(args: argparse.Namespace) -> int:
         "snapshot": snapshot(repo, config),
         "history": [item.as_dict() for item in items],
     }, indent=2))
+    return 0
+
+
+def run_evidence_pack(args: argparse.Namespace) -> int:
+    print(json.dumps(
+        evidence_pack(
+            args.repository,
+            args.task,
+            load_config(),
+            scope=args.scope,
+            terms=args.term,
+            symbols=args.symbol,
+            paths=args.path,
+            include_tests=args.include_tests,
+            include_history=args.include_history,
+            max_files=args.max_files,
+            measurement_tag=args.measurement_tag,
+        ),
+        indent=2,
+    ))
     return 0
 
 
@@ -529,6 +552,16 @@ def benchmark_capabilities_cmd(args: argparse.Namespace) -> int:
     return 0 if report["pass"] else 1
 
 
+def benchmark_evidence_service_cmd(args: argparse.Namespace) -> int:
+    try:
+        report = run_evidence_service_benchmark(args.repository)
+    except RuntimeError as exc:
+        print(json.dumps({"benchmark": "evidence-service-v1", "error": str(exc)}, indent=2), file=sys.stderr)
+        return 2
+    print(json.dumps(report, indent=2))
+    return 0 if report["pass"] else 1
+
+
 def benchmark_model_value_cmd(args: argparse.Namespace) -> int:
     try:
         report = run_model_value_benchmark(
@@ -676,6 +709,19 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--query")
     p.set_defaults(func=run_git_history)
 
+    p = sub.add_parser("evidence-pack", help="Build a deterministic cross-source evidence bundle")
+    p.add_argument("task")
+    p.add_argument("--repository", default=".")
+    p.add_argument("--scope", default=".")
+    p.add_argument("--term", action="append", default=None)
+    p.add_argument("--symbol", action="append", default=None)
+    p.add_argument("--path", action="append", default=None, help="Focus a known repository path; repeatable")
+    p.add_argument("--include-tests", action=argparse.BooleanOptionalAction, default=True)
+    p.add_argument("--include-history", action=argparse.BooleanOptionalAction, default=True)
+    p.add_argument("--max-files", type=int, default=6)
+    p.add_argument("--measurement-tag")
+    p.set_defaults(func=run_evidence_pack)
+
     p = sub.add_parser("repo-explore", help="Run repo explorer directly")
     p.add_argument("task")
     p.add_argument("--repository", default=".")
@@ -795,6 +841,10 @@ def build_parser() -> argparse.ArgumentParser:
     bp = bench.add_parser("capabilities", help="Run the caller-independent capability benchmark")
     bp.add_argument("--repository", default=".")
     bp.set_defaults(func=benchmark_capabilities_cmd)
+
+    bp = bench.add_parser("evidence-service", help="Run the model-free evidence-service benchmark")
+    bp.add_argument("--repository", default=".")
+    bp.set_defaults(func=benchmark_evidence_service_cmd)
 
     bp = bench.add_parser("model-value", help="Compare deterministic execution with optional local-model synthesis")
     bp.add_argument("--repository", default=".")
