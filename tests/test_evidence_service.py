@@ -1,9 +1,22 @@
+from dataclasses import replace
 from pathlib import Path
 import json
 import subprocess
 
 from gremlins.config import load_config
 from gremlins.evidence_service import evidence_pack
+
+
+def _config_for(repo: Path):
+    config = load_config()
+    return replace(
+        config,
+        security=replace(
+            config.security,
+            allowed_roots=(repo.resolve(),),
+            denied_paths=(),
+        ),
+    )
 
 
 def _repo(tmp_path: Path) -> Path:
@@ -38,7 +51,7 @@ def test_evidence_pack_fuzzy_discovery_relationships_and_history(tmp_path: Path)
     result = evidence_pack(
         str(repo),
         "Find where the system records whether a local model was called.",
-        load_config(),
+        _config_for(repo),
         max_files=6,
     )
     assert result["status"] == "complete"
@@ -52,7 +65,7 @@ def test_evidence_pack_fuzzy_discovery_relationships_and_history(tmp_path: Path)
         for relation in result["relationships"]
     )
     assert any(item["path"] == "src/provider.py" for item in result["history"]["by_path"])
-    assert len(json.dumps(result, separators=(",", ":"))) <= load_config().limits.max_result_evidence_chars
+    assert len(json.dumps(result, separators=(",", ":"))) <= _config_for(repo).limits.max_result_evidence_chars
 
 
 def test_evidence_pack_focus_path_is_preserved(tmp_path: Path):
@@ -60,7 +73,7 @@ def test_evidence_pack_focus_path_is_preserved(tmp_path: Path):
     result = evidence_pack(
         str(repo),
         "Show evidence around provider state.",
-        load_config(),
+        _config_for(repo),
         paths=["tests/test_provider.py"],
         include_history=False,
         max_files=2,
@@ -74,7 +87,7 @@ def test_evidence_pack_explicit_terms_do_not_broaden_fuzzy_variants(tmp_path: Pa
     result = evidence_pack(
         str(repo),
         "Find provider information.",
-        load_config(),
+        _config_for(repo),
         terms=["local_model_called"],
     )
     assert result["discovery"]["terms"][0] == "local_model_called"
