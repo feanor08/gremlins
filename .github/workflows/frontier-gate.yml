@@ -2,36 +2,18 @@ name: Frontier Savings Gate
 
 on:
   workflow_dispatch:
-    inputs:
-      model:
-        description: Optional Claude model override (blank uses the account default)
-        required: false
-        default: ""
-      repeats:
-        description: Number of B/C repetitions for the full gate
-        required: true
-        default: "2"
   push:
     paths:
       - ".github/workflows/frontier-gate.yml"
+      - "scripts/run_frontier_gate_ci.sh"
 
 permissions:
   contents: read
-
-concurrency:
-  group: frontier-gate-${{ github.ref }}
-  cancel-in-progress: false
 
 jobs:
   gate:
     runs-on: ubuntu-latest
     timeout-minutes: 120
-    env:
-      GREMLINS_STATE_DIR: ${{ runner.temp }}/gremlins-state
-      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-      MODEL: ${{ github.event.inputs.model || '' }}
-      REPEATS: ${{ github.event.inputs.repeats || '2' }}
 
     steps:
       - name: Check out source
@@ -45,202 +27,18 @@ jobs:
       - name: Install Gremlins
         run: uv sync --locked
 
-      - name: Validate deterministic stack
-        run: |
-          set -euo pipefail
-          uv run pytest -q
-          uv run gremlins mcp-smoke
-          uv run gremlins eval
-          uv run gremlins benchmark pilot-local --repository .
-
       - name: Install pinned Claude Code
         run: |
           set -euo pipefail
           curl -fsSL https://claude.ai/install.sh | bash -s 2.1.283
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
-      - name: Verify frontier credential
-        run: |
-          set -euo pipefail
-          if [ -z "${ANTHROPIC_API_KEY:-}" ] && [ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
-            echo "::error::Add repository secret ANTHROPIC_API_KEY (recommended) or CLAUDE_CODE_OAUTH_TOKEN before running the frontier gate."
-            exit 1
-          fi
-
-          claude --version
-
-          AUTH_OUTPUT="$(claude -p "Reply with exactly: AUTH_OK" --output-format text --max-turns 1)"
-          if [ "$AUTH_OUTPUT" != "AUTH_OK" ]; then
-            echo "::error::Claude authentication smoke failed."
-            exit 1
-          fi
-          echo "Claude authentication smoke passed."
-
-      - name: Register Gremlins MCP
-        run: |
-          set -euo pipefail
-          mkdir -p "$HOME/.local/bin"
-          cat > "$HOME/.local/bin/gremlins-mcp" <<EOF
-          #!/bin/sh
-          export GREMLINS_ROOT="$GITHUB_WORKSPACE"
-          exec "$GITHUB_WORKSPACE/.venv/bin/python" -m gremlins.server
-          EOF
-          chmod 755 "$HOME/.local/bin/gremlins-mcp"
-
-          claude mcp remove gremlins --scope user >/dev/null 2>&1 || true
-          claude mcp add --scope user gremlins -- "$HOME/.local/bin/gremlins-mcp"
-          claude mcp list
-
-      - name: Run treatment diagnostic
-        run: |
-          set -euo pipefail
-
-          DIAG="public-diag-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          DIAG_DIR="$RUNNER_TEMP/gremlins-diag"
-          mkdir -p "$DIAG_DIR"
-
-          run_case() {
-            case_id="$1"
-            arm="$2"
-            rc=0
-
-            args=(
-              .venv/bin/agentctl benchmark run
-              --study "$DIAG"
-              --repository .
-              --client claude
-              --case "$case_id"
-              --arm "$arm"
-              --iteration 1
-            )
-            if [ -n "${MODEL:-}" ]; then
-              args+=(--model "$MODEL")
-            fi
-
-            "${args[@]}" > "$DIAG_DIR/${case_id}-${arm}.json" || rc=$?
-            if [ "$rc" -gt 1 ]; then
-              echo "::error::Diagnostic execution failed for ${case_id}/${arm} with rc=${rc}"
-              exit "$rc"
-            fi
-          }
-
-          run_case repo-005 B
-          run_case repo-005 C
-          run_case repo-009 B
-          run_case repo-009 C
-
-          python3 - "$DIAG_DIR" <<'PY'
-          import json
-          import pathlib
-          import sys
-
-          root = pathlib.Path(sys.argv[1])
-          failures = []
-          summary = []
-
-          for case_id in ("repo-005", "repo-009"):
-              row = json.loads((root / f"{case_id}-C.json").read_text())
-              metadata = row.get("metadata") or {}
-              gremlins = row.get("gremlins") or {}
-              tool_names = metadata.get("tool_names") or []
-              denials = metadata.get("permission_denials") or []
-
-              checks = {
-                  "accepted": bool(row.get("accepted")),
-                  "one_gremlins_call": int(gremlins.get("calls") or 0) == 1,
-                  "no_local_model": int(gremlins.get("local_model_calls") or 0) == 0,
-                  "repo_explorer_only": tool_names == ["mcp__gremlins__repo_explorer"],
-                  "no_permission_denials": len(denials) == 0,
-                  "no_frontier_redo": row.get("frontier_redid_search") is False,
-              }
-              summary.append({"case_id": case_id, **checks})
-              if not all(checks.values()):
-                  failures.append({"case_id": case_id, "checks": checks})
-
-          print(json.dumps(summary, indent=2))
-          if failures:
-              print("Treatment diagnostic failed:", json.dumps(failures, indent=2), file=sys.stderr)
-              raise SystemExit(1)
-
-          print("TREATMENT_DIAGNOSTIC=PASS")
-          PY
-
-      - name: Run full 40-run B/C gate study
-        id: suite
-        run: |
-          set -euo pipefail
-
-          STUDY="public-gate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          RESULT_DIR="$GREMLINS_STATE_DIR/results"
-          mkdir -p "$RESULT_DIR"
-
-          echo "STUDY=$STUDY" >> "$GITHUB_ENV"
-          echo "RESULT_DIR=$RESULT_DIR" >> "$GITHUB_ENV"
-
-          args=(
-            .venv/bin/agentctl benchmark suite
-            --study "$STUDY"
-            --repository .
-            --client claude
-            --repeats "$REPEATS"
-          )
-          if [ -n "${MODEL:-}" ]; then
-            args+=(--model "$MODEL")
-          fi
-
-          set +e
-          "${args[@]}" > "$RESULT_DIR/suite.json"
-          rc=$?
-          set -e
-
-          echo "SUITE_RC=$rc" >> "$GITHUB_ENV"
-          echo "Full suite exit code: $rc"
-
-      - name: Build report and evaluate gate
-        if: always() && env.STUDY != ''
-        run: |
-          set -euo pipefail
-
-          set +e
-          .venv/bin/agentctl benchmark report --study "$STUDY" > "$RESULT_DIR/report.json"
-          report_rc=$?
-          .venv/bin/agentctl benchmark gate --study "$STUDY" > "$RESULT_DIR/gate.json"
-          gate_rc=$?
-          set -e
-
-          echo "REPORT_RC=$report_rc" >> "$GITHUB_ENV"
-          echo "GATE_RC=$gate_rc" >> "$GITHUB_ENV"
-
-          python3 - "$RESULT_DIR/report.json" "$RESULT_DIR/gate.json" "$GITHUB_STEP_SUMMARY" <<'PY'
-          import json
-          import pathlib
-          import sys
-
-          report_path, gate_path, summary_path = map(pathlib.Path, sys.argv[1:])
-          report = json.loads(report_path.read_text()) if report_path.exists() and report_path.stat().st_size else {}
-          gate = json.loads(gate_path.read_text()) if gate_path.exists() and gate_path.stat().st_size else {}
-          comparison = report.get("comparison_B_to_C") or {}
-
-          lines = [
-              "# Gremlins frontier savings gate",
-              "",
-              f"- Study: `{gate.get('study', 'unknown')}`",
-              f"- Gate pass: **{gate.get('pass')}**",
-              f"- Paired runs: {gate.get('paired_cases')}",
-              f"- Unique cases: {gate.get('unique_cases')}",
-              f"- Processed-token change: {comparison.get('frontier_processed_tokens_change_pct')}%",
-              f"- Median pair token change: {comparison.get('frontier_processed_tokens_median_pair_change_pct')}%",
-              f"- Acceptance: {comparison.get('acceptance_rate_before')} → {comparison.get('acceptance_rate_after')}",
-              f"- Redo rate after: {comparison.get('redo_rate_after')}",
-              f"- Elapsed change: {comparison.get('elapsed_change_pct')}%",
-              "",
-              "## Gate reasons",
-          ]
-          reasons = gate.get("reasons") or []
-          lines.extend([f"- {reason}" for reason in reasons] or ["- none"])
-          summary_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-          print("\n".join(lines))
-          PY
+      - name: Run diagnostic and full frontier gate
+        env:
+          GREMLINS_STATE_DIR: ${{ runner.temp }}/gremlins-state
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: scripts/run_frontier_gate_ci.sh
 
       - name: Upload public-safe benchmark evidence
         if: always()
@@ -250,24 +48,6 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
           path: |
-            ${{ env.GREMLINS_STATE_DIR }}/benchmarks/*.jsonl
-            ${{ env.GREMLINS_STATE_DIR }}/benchmarks/*.meta.json
-            ${{ env.GREMLINS_STATE_DIR }}/results/*.json
-
-      - name: Enforce suite and gate result
-        if: always() && env.STUDY != ''
-        run: |
-          set -euo pipefail
-          if [ "${SUITE_RC:-99}" -ne 0 ]; then
-            echo "::error::The benchmark suite had execution/setup errors (rc=${SUITE_RC:-99})."
-            exit 1
-          fi
-          if [ "${REPORT_RC:-99}" -ne 0 ]; then
-            echo "::error::The benchmark report could not be generated."
-            exit 1
-          fi
-          if [ "${GATE_RC:-99}" -ne 0 ]; then
-            echo "::error::The measured B/C study did not pass the configured gate."
-            exit 1
-          fi
-          echo "FRONTIER_GATE=PASS"
+            ${{ runner.temp }}/gremlins-state/benchmarks/*.jsonl
+            ${{ runner.temp }}/gremlins-state/benchmarks/*.meta.json
+            ${{ runner.temp }}/gremlins-state/results/*.json
