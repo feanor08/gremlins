@@ -189,14 +189,64 @@ def _tool_names_from_content(content: Any) -> list[str]:
     return names
 
 
-def _claude_tool_names(events: list[dict]) -> list[str]:
-    names: list[str] = []
-    for event in events:
+def _claude_tool_uses(events: list[dict]) -> list[dict]:
+    uses: list[dict] = []
+    seen: set[tuple[str, str, int]] = set()
+
+    def collect(content: Any, event: dict, event_index: int) -> None:
+        if not isinstance(content, list):
+            return
+        for item in content:
+            if not isinstance(item, dict):
+                continue
+            if item.get("type") not in {"tool_use", "server_tool_use"}:
+                continue
+            name = item.get("name")
+            if not isinstance(name, str) or not name:
+                continue
+            tool_id = str(item.get("id") or "")
+            key = (tool_id, name, event_index)
+            if key in seen:
+                continue
+            seen.add(key)
+            tool_input = item.get("input")
+            parent_id = (
+                item.get("parent_tool_use_id")
+                or event.get("parent_tool_use_id")
+            )
+            uses.append({
+                "name": name,
+                "id": tool_id or None,
+                "input": tool_input if isinstance(tool_input, dict) else {},
+                "parent_tool_use_id": str(parent_id) if parent_id else None,
+                "event_index": event_index,
+            })
+
+    for event_index, event in enumerate(events):
         message = event.get("message")
         if isinstance(message, dict):
-            names.extend(_tool_names_from_content(message.get("content")))
-        names.extend(_tool_names_from_content(event.get("content")))
-    return names
+            collect(message.get("content"), event, event_index)
+        collect(event.get("content"), event, event_index)
+
+    by_id = {
+        str(use["id"]): use
+        for use in uses
+        if use.get("id")
+    }
+    for use in uses:
+        parent = use.get("parent_tool_use_id")
+        depth = 0
+        seen_parents: set[str] = set()
+        while parent and parent in by_id and parent not in seen_parents:
+            seen_parents.add(parent)
+            depth += 1
+            parent = by_id[parent].get("parent_tool_use_id")
+        use["observed_depth"] = depth if depth or not use.get("parent_tool_use_id") else None
+    return uses
+
+
+def _claude_tool_names(events: list[dict]) -> list[str]:
+    return [str(use["name"]) for use in _claude_tool_uses(events)]
 
 
 def _parse_claude_stream(stdout: str, returncode: int, elapsed_seconds: float) -> ClientRun:
@@ -240,8 +290,26 @@ def _parse_claude_stream(stdout: str, returncode: int, elapsed_seconds: float) -
     except (TypeError, ValueError):
         cost_usd = None
 
-    tool_names = _claude_tool_names(events)
-    subagent_calls = sum(name.lower() in {"agent", "task"} for name in tool_names)
+    tool_uses = _claude_tool_uses(events)
+    tool_names = [str(use["name"]) for use in tool_uses]
+    subagent_details: list[dict] = []
+    for use in tool_uses:
+        if str(use["name"]).lower() not in {"agent", "task"}:
+            continue
+        payload = use.get("input") if isinstance(use.get("input"), dict) else {}
+        subagent_details.append({
+            "tool_name": use["name"],
+            "tool_use_id": use.get("id"),
+            "parent_tool_use_id": use.get("parent_tool_use_id"),
+            "observed_depth": use.get("observed_depth"),
+            "subagent_type": payload.get("subagent_type") or payload.get("agent_type") or payload.get("type"),
+            "description": payload.get("description"),
+            "prompt": payload.get("prompt"),
+            "model": payload.get("model"),
+            "isolation": payload.get("isolation"),
+            "run_in_background": payload.get("run_in_background"),
+        })
+    subagent_calls = len(subagent_details)
     is_error = bool(final.get("is_error")) if final else False
     success = returncode == 0 and not is_error and bool(response_text)
     return ClientRun(
@@ -258,7 +326,9 @@ def _parse_claude_stream(stdout: str, returncode: int, elapsed_seconds: float) -
             "session_id": final.get("session_id") if final else None,
             "tool_names": tool_names,
             "tool_calls": len(tool_names),
+            "tool_uses": tool_uses,
             "subagent_calls": subagent_calls,
+            "subagent_details": subagent_details,
             "permission_denials": final.get("permission_denials") if final else None,
         },
     )
