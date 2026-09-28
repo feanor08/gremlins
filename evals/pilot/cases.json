@@ -1,0 +1,228 @@
+[
+  {
+    "id": "repo-001",
+    "task": "Find where ProviderBusy is defined and where it changes worker status.",
+    "terms": [
+      "ProviderBusy",
+      "status = \"busy\""
+    ],
+    "expected_paths": [
+      "src/gremlins/provider.py",
+      "src/gremlins/workers.py"
+    ],
+    "expected_claims": [
+      [
+        "ProviderBusy"
+      ],
+      [
+        "ProviderError"
+      ],
+      [
+        "busy"
+      ]
+    ]
+  },
+  {
+    "id": "repo-002",
+    "task": "Find the frontier-facing evidence size budget.",
+    "terms": [
+      "max_result_evidence_chars"
+    ],
+    "expected_paths": [
+      "gremlins.toml",
+      "src/gremlins/config.py"
+    ],
+    "expected_claims": [
+      [
+        "max_result_evidence_chars"
+      ],
+      [
+        "8000",
+        "8,000"
+      ]
+    ]
+  },
+  {
+    "id": "repo-003",
+    "task": "Find how exact terms supplied by the orchestrator override fallback keyword extraction.",
+    "terms": [
+      "effective_terms",
+      "terms",
+      "symbols"
+    ],
+    "expected_paths": [
+      "src/gremlins/retrieval.py"
+    ],
+    "expected_claims": [
+      [
+        "effective_terms"
+      ],
+      [
+        "terms",
+        "symbols"
+      ],
+      [
+        "override",
+        "supplied",
+        "explicit"
+      ]
+    ]
+  },
+  {
+    "id": "repo-004",
+    "task": "Find the deterministic-only repo explorer path.",
+    "terms": [
+      "deterministic_only",
+      "local_model_called"
+    ],
+    "expected_paths": [
+      "src/gremlins/workers.py"
+    ],
+    "expected_claims": [
+      [
+        "deterministic_only"
+      ],
+      [
+        "local_model_called"
+      ],
+      [
+        "false",
+        "no local model",
+        "without a model"
+      ]
+    ]
+  },
+  {
+    "id": "repo-005",
+    "task": "Find the local inference lock and its configured timeout.",
+    "terms": [
+      "inference.lock",
+      "inference_lock_timeout_seconds"
+    ],
+    "expected_paths": [
+      "src/gremlins/provider.py",
+      "gremlins.toml"
+    ],
+    "expected_claims": [
+      [
+        "inference.lock"
+      ],
+      [
+        "inference_lock_timeout_seconds"
+      ],
+      [
+        "3.0",
+        "3 seconds",
+        "3 second"
+      ]
+    ]
+  },
+  {
+    "id": "repo-006",
+    "task": "Find where Git history is constrained to fixed read operations.",
+    "terms": [
+      "def git_history",
+      "--pretty=format"
+    ],
+    "expected_paths": [
+      "src/gremlins/retrieval.py"
+    ],
+    "expected_claims": [
+      [
+        "git_history"
+      ],
+      [
+        "git log"
+      ],
+      [
+        "--pretty=format",
+        "pretty=format"
+      ]
+    ]
+  },
+  {
+    "id": "repo-007",
+    "task": "Find the Claude and Codex MCP registration code.",
+    "terms": [
+      "[\"claude\", \"mcp\"",
+      "[\"codex\", \"mcp\""
+    ],
+    "expected_paths": [
+      "src/gremlins/cli.py"
+    ],
+    "expected_claims": [
+      [
+        "_configure_claude",
+        "claude mcp"
+      ],
+      [
+        "_configure_codex",
+        "codex mcp"
+      ],
+      [
+        "mcp add"
+      ]
+    ]
+  },
+  {
+    "id": "repo-008",
+    "task": "Find where CI enforces the committed dependency lock.",
+    "terms": [
+      "uv sync --locked"
+    ],
+    "expected_paths": [
+      ".github/workflows/ci.yml"
+    ],
+    "expected_claims": [
+      [
+        "uv sync --locked"
+      ],
+      [
+        "ci.yml",
+        ".github/workflows/ci.yml"
+      ]
+    ]
+  },
+  {
+    "id": "repo-009",
+    "task": "Find the statement that architecture expansion is gated on measurement.",
+    "terms": [
+      "Workstream G",
+      "Gate"
+    ],
+    "expected_paths": [
+      "architecture.md"
+    ],
+    "expected_claims": [
+      [
+        "Workstream G"
+      ],
+      [
+        "measurement"
+      ],
+      [
+        "gate",
+        "must pass"
+      ]
+    ]
+  },
+  {
+    "id": "repo-010",
+    "task": "Find where the mac-local profile defines optional extra allowed repository roots.",
+    "terms": [
+      "allowed_roots_extra"
+    ],
+    "expected_paths": [
+      "profiles/mac-local.toml"
+    ],
+    "expected_claims": [
+      [
+        "allowed_roots_extra"
+      ],
+      [
+        "mac-local.toml",
+        "profiles/mac-local.toml"
+      ]
+    ]
+  }
+]

@@ -1,0 +1,9 @@
+name = "mac-local"
+platform = "darwin-arm64"
+transport = "stdio"
+provider = "ollama-default"
+model_class = "evidence-extraction"
+max_concurrent_local_inference = 1
+cloud_fallback = false
+
+allowed_roots_extra = []

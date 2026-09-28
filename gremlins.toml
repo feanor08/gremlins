@@ -1,0 +1,64 @@
+[provider]
+kind = "ollama"
+url = "http://127.0.0.1:11434"
+model = "qwen3.5:4b"
+inference_lock_timeout_seconds = 3.0
+
+[limits]
+max_task_chars = 4000
+max_evidence_chars = 48000
+max_result_evidence_chars = 8000
+max_file_chars = 16000
+max_search_matches = 80
+max_history_entries = 24
+max_model_output_tokens = 1200
+model_context_tokens = 16384
+model_timeout_seconds = 90
+command_timeout_seconds = 12
+
+[security]
+allowed_roots = ["~"]
+denied_paths = [
+  "~/.ssh",
+  "~/.aws",
+  "~/.gnupg",
+  "~/.config/gcloud",
+  "~/Library/Keychains",
+]
+require_git_repository = true
+allow_network_to = ["127.0.0.1", "localhost"]
+
+[workers.repo-explorer]
+skills = ["repo-search", "git-history"]
+model_class = "evidence-extraction"
+read_only = true
+
+[workers.triage]
+skills = ["log-analysis", "test-analysis"]
+model_class = "evidence-extraction"
+read_only = true
+
+[bindings]
+"repo.search.literal" = "builtin-ripgrep"
+"code.read" = "builtin-source-reader"
+"git.history" = "builtin-git-history"
+"worker.repo-explorer" = "repo-explorer"
+"worker.triage" = "triage"
+"model.evidence-extraction" = "ollama-default"
+
+[model_classes.evidence-extraction]
+provider = "ollama-default"
+placement = "local-only"
+cloud_fallback = false
+
+[tools.builtin-ripgrep]
+provides = "repo.search.literal"
+read_only = true
+
+[tools.builtin-source-reader]
+provides = "code.read"
+read_only = true
+
+[tools.builtin-git-history]
+provides = "git.history"
+read_only = true
