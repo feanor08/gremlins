@@ -73,7 +73,14 @@ def _path_role(path: str) -> str:
 
 def _tracked_paths(repo: Path, config: Config) -> list[str]:
     proc = _run_git(repo, ["ls-files"], config)
-    return proc.stdout.splitlines() if proc.returncode == 0 else []
+    if proc.returncode != 0:
+        return []
+    # Respect sparse/isolated benchmark worktrees: an index entry whose file is
+    # intentionally absent must not re-enter discovery merely through git ls-files.
+    return [
+        path for path in proc.stdout.splitlines()
+        if (repo / path).is_file()
+    ]
 
 
 def _dedupe(values: Sequence[str], limit: int) -> list[str]:
@@ -276,10 +283,13 @@ def _top_paths(
         item.path for item in path_inventory(repo, search_terms, config)
         if item.path
     ]
-    candidates = _dedupe(
-        [*focused, *hits_by_path.keys(), *inventory_paths],
-        120,
-    )
+    candidates = [
+        path for path in _dedupe(
+            [*focused, *hits_by_path.keys(), *inventory_paths],
+            120,
+        )
+        if (repo / path).is_file()
+    ]
 
     def base_score(path: str) -> tuple[int, int, int, int]:
         hits = hits_by_path.get(path, [])
@@ -368,6 +378,78 @@ def _top_paths(
         if path not in selected:
             selected.append(path)
     return selected[:max_files]
+
+
+def _related_path_index(
+    repo: Path,
+    evidence: list[Evidence],
+    search_terms: Sequence[str],
+    selected_paths: Sequence[str],
+    config: Config,
+    limit: int = 24,
+) -> list[dict]:
+    hits_by_path: dict[str, list[Evidence]] = defaultdict(list)
+    for item in evidence:
+        if item.kind == "search" and item.path and (repo / item.path).is_file():
+            hits_by_path[item.path].append(item)
+
+    structural = set(
+        _python_neighbors(
+            repo,
+            [path for path in selected_paths if _path_role(path) == "source"][:6],
+            config,
+            limit=12,
+        )
+    )
+    inventory = [
+        item.path for item in path_inventory(repo, search_terms, config)
+        if item.path and (repo / item.path).is_file()
+    ]
+    candidates = _dedupe(
+        [*selected_paths, *structural, *hits_by_path.keys(), *inventory],
+        100,
+    )
+    selected_rank = {path: index for index, path in enumerate(selected_paths)}
+
+    def score(path: str) -> tuple[int, int, int, int, int, str]:
+        hits = hits_by_path.get(path, [])
+        matched = _search_terms_for_path(path, hits, search_terms)
+        low = path.lower()
+        name = Path(low).name
+        path_term_score = sum(
+            12 if term.lower() in name else 4
+            for term in search_terms
+            if term.lower() in low
+        )
+        return (
+            1 if path in selected_rank else 0,
+            1 if path in structural else 0,
+            path_term_score,
+            len({term.lower() for term in matched}),
+            min(len(hits), 6),
+            path,
+        )
+
+    ranked = sorted(
+        candidates,
+        key=lambda path: (
+            -(100 - selected_rank[path]) if path in selected_rank else 0,
+            -score(path)[1],
+            -score(path)[2],
+            -score(path)[3],
+            -score(path)[4],
+            len(path),
+            path,
+        ),
+    )
+    return [
+        {
+            "path": path,
+            "role": _path_role(path),
+            "detailed": path in selected_rank,
+        }
+        for path in ranked[:limit]
+    ]
 
 
 def _test_relationships(
@@ -628,6 +710,13 @@ def evidence_pack(
     ]
     files.sort(key=lambda item: (-int(item["score"]), item["path"]))
 
+    related_paths = _related_path_index(
+        repo,
+        evidence,
+        search_terms,
+        [item["path"] for item in files],
+        config,
+    )
     relationships = (
         _test_relationships(
             repo,
@@ -669,6 +758,7 @@ def evidence_pack(
             "coverage": search_meta.get("terms", {}),
         },
         "files": files,
+        "related_paths": related_paths,
         "relationships": relationships,
         "history": history,
         "truncated": bool(evidence_truncated or search_meta.get("truncated")),
