@@ -10,8 +10,8 @@ Use Gremlins when it can replace multiple frontier retrieval hops, not merely ad
 - Use `code_read` for bounded excerpts instead of reading whole files.
 - Use `git_history` for commit-history evidence.
 - Use `repo_explorer` for multi-term or multi-file repository location work that would otherwise require several search/read steps. Supply a small exact term/symbol set and use `mode="auto"`; auto is deterministic and never calls the local model.
-- Use `mode="model"` only when local synthesis is explicitly useful. Do not trigger local inference just because a task says "how", "explain", or similar.
-- Use `failure_triage` with `path` when logs are in a repository; do not paste a large log into the parent context first.
+- Do not use `repo_explorer mode="model"` in normal routing. The Mac model-value benchmark found only +3.33 percentage points mean quality for ~39.5x median latency and +33.9% median result size. Keep model mode only for manual experiments/benchmarking until stronger evidence changes that result.
+- Use `failure_triage` with `path` when logs are in a repository; do not paste a large log into the parent context first. Current Mac measurement supports local synthesis for bounded triage: +35 percentage points mean quality over deterministic evidence extraction on the first five-case corpus. Treat its output as bounded triage assistance, not Claude-level root-cause reasoning.
 
 Pass a short task and exact targets, not the parent conversation. Gremlins workers cannot spawn children and never modify the repository.
 

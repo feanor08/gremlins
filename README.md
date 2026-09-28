@@ -53,6 +53,18 @@ Current capabilities include:
 
 The local model is **optional to the architecture**. Deterministic capabilities should work without inference whenever inference is unnecessary.
 
+### Measured model-routing policy
+
+The first Apple-Silicon Mac model-value run with Ollama + `qwen3.5:4b` established a provisional routing boundary:
+
+- repository search/read/history and normal `repo_explorer`: deterministic;
+- `repo_explorer mode=model`: benchmark/manual experiment only, not normal routing;
+- failure evidence extraction: deterministic first stage;
+- bounded failure grouping, likely-cause synthesis, and next checks: local-model triage when available;
+- ambiguous debugging, architecture, trade-offs, patch design, and subtle review remain caller/frontier-model work.
+
+On the first corpus, repo-explorer local synthesis improved mean quality only from 0.95 to 0.9833 (+3.33 pp) while increasing median latency from 0.241 s to 9.523 s (~39.5x) and median result size by 33.9%. Triage improved mean quality from 0.60 to 0.95 (+35 pp), with ~4.93 s median local-model latency. These are initial measurements, not universal constants; routing changes require new evidence.
+
 ## Interfaces
 
 ### CLI — first-class interface

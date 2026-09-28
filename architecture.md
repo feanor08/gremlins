@@ -1708,6 +1708,15 @@ Retrieval finds the evidence needed for the measured task set with lower frontie
 
 ## Workstream F — benchmark model value and provider alternatives
 
+**Status:** first Mac model-value measurement completed. A provisional per-worker routing decision now exists.
+
+Current measured routing:
+- repo exploration stays deterministic in normal operation; local synthesis did not meet the materiality threshold;
+- bounded triage keeps deterministic evidence extraction and may use the local model for grouping/explanation/next checks;
+- Claude-level ambiguous debugging, architecture, trade-offs, patch design, and subtle review are explicitly outside this local-worker optimization.
+
+The first result is a routing decision for the measured corpus, not a claim that one model/runtime is universally best.
+
 ### Goals
 
 Determine when local inference adds value beyond deterministic retrieval.
