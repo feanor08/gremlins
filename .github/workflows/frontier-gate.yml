@@ -2,10 +2,6 @@ name: Claude Integration Savings Gate
 
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - ".github/workflows/frontier-gate.yml"
-      - "scripts/run_frontier_gate_ci.sh"
 
 permissions:
   contents: read
