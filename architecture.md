@@ -196,6 +196,13 @@ caller reasoning / next question
 
 The caller owns causal conclusions, architecture, trade-offs, and patch design. Repeated evidence-pack calls during RCA are expected when each call answers a narrower evidence question.
 
+The evidence loop has two explicit result profiles:
+
+- **broad** — one cross-source discovery pass with the normal bounded result budget;
+- **focused** — later path/term/symbol-constrained follow-ups with a substantially smaller result budget.
+
+The caller should move from broad to focused rather than repeatedly paying for broad discovery. This is a context-control rule, not a reasoning rule.
+
 ---
 
 ## 4.2 Tool
