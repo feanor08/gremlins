@@ -198,6 +198,8 @@ def test_tagged_gremlins_stats(monkeypatch, tmp_path: Path):
     assert stats["result_chars"] == 5000
     assert stats["elapsed_seconds"] == 3.25
     assert stats["workers"] == {"repo-explorer": 1, "triage": 1}
+    assert stats["evidence_pack_details"] == []
+    assert stats["evidence_pack_budgets"] == []
 
 
 def test_benchmark_prompt_carries_measurement_tag():
@@ -215,7 +217,9 @@ def test_benchmark_prompt_carries_measurement_tag():
 
 def test_c_prompt_prefers_iterative_evidence_pack_before_frontier_redo():
     prompt = build_arm_prompt("repo-001", "C", repository="/tmp/example")["prompt"]
-    assert "call evidence_pack again with a narrower task" in prompt
+    assert "The FIRST evidence_pack call must use detail='broad'" in prompt
+    assert "Every LATER evidence_pack call must use detail='focused'" in prompt
+    assert "Do not make a second broad call" in prompt
     assert "Prefer another focused evidence_pack over direct Read/Grep/Glob retrieval" in prompt
     assert "Bash, web tools, and write/edit tools are unavailable in this arm" in prompt
     assert "FRONTIER_REDO_SEARCH=true" in prompt
