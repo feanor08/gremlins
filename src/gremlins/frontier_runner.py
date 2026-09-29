@@ -1078,6 +1078,13 @@ def run_frontier_suite(
     repeats = max(1, int(repeats))
     cases = load_pilot_cases()
 
+    treatment_preflight = frontier_preflight(source, client)
+    if not treatment_preflight["ok"]:
+        raise RuntimeError(
+            "Gremlins frontier preflight failed before the suite could spend any benchmark model calls: "
+            + json.dumps(treatment_preflight, ensure_ascii=False, separators=(",", ":"))
+        )
+
     source_head = subprocess.run(
         ["git", "-C", str(source), "rev-parse", "HEAD"],
         text=True,
@@ -1183,6 +1190,7 @@ def run_frontier_suite(
         "client_version": client_version,
         "gremlins_head": gremlins_head,
         "metadata_file": str(metadata_path),
+        "preflight": treatment_preflight,
         "runs_attempted": len(cases) * len(arms_base) * repeats,
         "runs_completed": len(runs),
         "runs_skipped_existing": len(skipped),
