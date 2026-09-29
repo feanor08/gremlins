@@ -163,7 +163,8 @@ Run capabilities directly:
 uv run gremlins repo-search RetryExhaustedError --repository .
 uv run gremlins code-read src/gremlins/workers.py --repository . --start-line 1 --line-count 80
 uv run gremlins git-history --repository . --path src/gremlins/workers.py
-uv run gremlins evidence-pack "Trace worker status handling and relevant tests" --repository .
+uv run gremlins evidence-pack "Trace worker status handling and relevant tests" --repository . --detail broad
+uv run gremlins evidence-pack "Show the exact status mapping" --repository . --detail focused --path src/gremlins/workers.py --term ProviderBusy
 
 uv run gremlins repo-explore \
   "Find the provider configuration" \
