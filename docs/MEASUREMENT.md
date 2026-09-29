@@ -235,7 +235,7 @@ THG deployment is intentionally paused until Gremlins is tested with both fronti
 For each client, run a separate provenance-locked study with `--include-a`:
 
 - **A — normal client workflow:** Gremlins is forbidden; the client's normal subagent/multi-agent behavior is allowed.
-- **B — tuned frontier-only:** Gremlins is hard-disabled and subagents are disabled.
+- **B — tuned frontier-only:** Gremlins is hard-disabled and subagents are disabled. Claude B/C runs expose only native `Read`, `Grep`, and `Glob`; Bash, web, and write/edit tools are blocked to eliminate noninteractive permission-denial noise.
 - **C — Gremlins evidence loop:** subagents are disabled; the client must use deterministic `evidence_pack` first and may make **1–4 tagged evidence-pack calls** as its reasoning develops.
 
 The product gate remains **B vs C**. Arm A is diagnostic: it shows how much the client's normal agent/subagent-heavy workflow costs relative to a disciplined baseline.
