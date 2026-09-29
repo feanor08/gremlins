@@ -83,6 +83,8 @@ def test_paired_report_prefers_b_to_c(monkeypatch, tmp_path: Path):
             frontier_direct_evidence_calls=1,
             gremlins_calls=1,
             gremlins_result_chars=3200,
+            gremlins_evidence_pack_details=("broad",),
+            gremlins_evidence_pack_budgets=(8000,),
         ),
     )
 
@@ -95,6 +97,8 @@ def test_paired_report_prefers_b_to_c(monkeypatch, tmp_path: Path):
     assert comparison["acceptance_rate_after"] == 1.0
     assert comparison["frontier_direct_tool_calls_change_pct"] == -75.0
     assert comparison["frontier_direct_evidence_calls_change_pct"] == -85.71
+    assert comparison["pairs"][0]["gremlins_evidence_pack_details_after"] == ["broad"]
+    assert comparison["pairs"][0]["gremlins_evidence_pack_budgets_after"] == [8000]
 
 
 def test_parse_provider_usage_shapes():
@@ -200,6 +204,38 @@ def test_tagged_gremlins_stats(monkeypatch, tmp_path: Path):
     assert stats["workers"] == {"repo-explorer": 1, "triage": 1}
     assert stats["evidence_pack_details"] == []
     assert stats["evidence_pack_budgets"] == []
+
+
+def test_tagged_evidence_pack_stats_preserve_detail_sequence(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("GREMLINS_STATE_DIR", str(tmp_path))
+    from gremlins.metrics import record
+
+    record({
+        "worker": "evidence-pack",
+        "status": "complete",
+        "measurement_tag": "loop",
+        "elapsed_seconds": 1.0,
+        "result_chars": 7900,
+        "result_budget_chars": 8000,
+        "detail": "broad",
+        "usage": {"local_model_called": False},
+    })
+    record({
+        "worker": "evidence-pack",
+        "status": "complete",
+        "measurement_tag": "loop",
+        "elapsed_seconds": 0.5,
+        "result_chars": 3400,
+        "result_budget_chars": 3600,
+        "detail": "focused",
+        "usage": {"local_model_called": False},
+    })
+
+    stats = gremlins_stats_for_tag("loop")
+    assert stats["calls"] == 2
+    assert stats["evidence_pack_details"] == ["broad", "focused"]
+    assert stats["evidence_pack_budgets"] == [8000, 3600]
+    assert stats["result_chars"] == 11300
 
 
 def test_benchmark_prompt_carries_measurement_tag():
