@@ -85,6 +85,7 @@ def test_paired_report_prefers_b_to_c(monkeypatch, tmp_path: Path):
             gremlins_result_chars=3200,
             gremlins_evidence_pack_details=("broad",),
             gremlins_evidence_pack_budgets=(8000,),
+            gremlins_evidence_pack_result_chars=(3200,),
         ),
     )
 
@@ -99,6 +100,7 @@ def test_paired_report_prefers_b_to_c(monkeypatch, tmp_path: Path):
     assert comparison["frontier_direct_evidence_calls_change_pct"] == -85.71
     assert comparison["pairs"][0]["gremlins_evidence_pack_details_after"] == ["broad"]
     assert comparison["pairs"][0]["gremlins_evidence_pack_budgets_after"] == [8000]
+    assert comparison["pairs"][0]["gremlins_evidence_pack_result_chars_after"] == [3200]
 
 
 def test_parse_provider_usage_shapes():
@@ -204,6 +206,7 @@ def test_tagged_gremlins_stats(monkeypatch, tmp_path: Path):
     assert stats["workers"] == {"repo-explorer": 1, "triage": 1}
     assert stats["evidence_pack_details"] == []
     assert stats["evidence_pack_budgets"] == []
+    assert stats["evidence_pack_result_chars"] == []
 
 
 def test_tagged_evidence_pack_stats_preserve_detail_sequence(monkeypatch, tmp_path: Path):
@@ -235,6 +238,7 @@ def test_tagged_evidence_pack_stats_preserve_detail_sequence(monkeypatch, tmp_pa
     assert stats["calls"] == 2
     assert stats["evidence_pack_details"] == ["broad", "focused"]
     assert stats["evidence_pack_budgets"] == [8000, 3600]
+    assert stats["evidence_pack_result_chars"] == [7900, 3400]
     assert stats["result_chars"] == 11300
 
 
