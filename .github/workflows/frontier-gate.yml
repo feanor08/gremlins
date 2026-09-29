@@ -1,4 +1,4 @@
-name: Claude Integration Savings Gate
+name: Claude Evidence Loop Savings Gate
 
 on:
   workflow_dispatch:
