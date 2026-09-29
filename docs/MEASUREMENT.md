@@ -222,38 +222,71 @@ For each client, run a separate provenance-locked study with `--include-a`:
 
 - **A — normal client workflow:** Gremlins is forbidden; the client's normal subagent/multi-agent behavior is allowed.
 - **B — tuned frontier-only:** Gremlins is hard-disabled and subagents are disabled.
-- **C — Gremlins-assisted:** subagents are disabled; the client must make exactly one deterministic Gremlins `repo_explorer` call before broad retrieval.
+- **C — Gremlins evidence loop:** subagents are disabled; the client must use deterministic `evidence_pack` first and may make **1–4 tagged evidence-pack calls** as its reasoning develops.
 
-The product gate is still **B vs C**. Arm A is diagnostic: it shows how much the client's normal agent/subagent-heavy workflow costs relative to a disciplined baseline.
+The product gate remains **B vs C**. Arm A is diagnostic: it shows how much the client's normal agent/subagent-heavy workflow costs relative to a disciplined baseline.
 
-Claude enforcement uses the CLI tool allow/deny surface. Codex enforcement uses per-run config overrides: arm B sets `mcp_servers.gremlins.enabled=false`; arm C enables the Gremlins MCP server and restricts it to `repo_explorer`. Both B and C disable client subagents.
+Arm C now matches the measured architecture rather than the older one-shot repo-explorer experiment:
 
-Run one breadth-first pass first:
+```text
+frontier hypothesis/question
+        |
+        v
+evidence_pack #1
+        |
+        v
+frontier reasoning
+        |
+        +--> enough evidence -> answer
+        |
+        +--> narrower evidence question
+                  |
+                  v
+             evidence_pack #2..#4
+```
+
+Every C-arm evidence-pack call must reuse the run's unique measurement tag. Other Gremlins capabilities and local-model calls make the treatment invalid. Direct frontier Read/Grep/Glob/Bash/Git retrieval remains available only as fallback so the benchmark can measure when Gremlins is insufficient; the response must report `FRONTIER_REDO_SEARCH=true` if that fallback occurs.
+
+Claude enforcement uses the CLI tool allow/deny surface. Codex enforcement uses per-run config overrides: arm B sets `mcp_servers.gremlins.enabled=false`; arm C enables the Gremlins MCP server and restricts it to `evidence_pack`. Both B and C disable client subagents.
+
+The runner now records, in addition to tokens/acceptance/elapsed time:
+
+- direct parent/frontier non-Gremlins tool calls;
+- direct parent/frontier evidence-acquisition calls;
+- Gremlins evidence-pack call count;
+- local-model call count;
+- frontier redo-search marker.
+
+This lets us test the core observation-derived hypothesis directly: **does the evidence loop remove parent-model retrieval operations, not merely reduce tokens?**
+
+Run one breadth-first pass first with fresh v2 study names:
 
 ```bash
 uv run gremlins benchmark suite \
-  --study mac-claude-abc-v1 \
+  --study mac-claude-evidence-loop-v2 \
   --repository . \
   --client claude \
   --include-a \
-  --repeats 1
+  --repeats 1 \
+  --save-raw
 
 uv run gremlins benchmark suite \
-  --study mac-codex-abc-v1 \
+  --study mac-codex-evidence-loop-v2 \
   --repository . \
   --client codex \
   --include-a \
-  --repeats 1
+  --repeats 1 \
+  --save-raw
 ```
 
 Then inspect:
 
 ```bash
-uv run gremlins benchmark report --study mac-claude-abc-v1
-uv run gremlins benchmark gate --study mac-claude-abc-v1
+uv run gremlins benchmark report --study mac-claude-evidence-loop-v2
+uv run gremlins benchmark gate --study mac-claude-evidence-loop-v2
 
-uv run gremlins benchmark report --study mac-codex-abc-v1
-uv run gremlins benchmark gate --study mac-codex-abc-v1
+uv run gremlins benchmark report --study mac-codex-evidence-loop-v2
+uv run gremlins benchmark gate --study mac-codex-evidence-loop-v2
 ```
 
 If a client is close to the gate or results are noisy, repeat the same study with `--repeats 2`; the suite resumes the missing second iteration without discarding the first.
@@ -276,7 +309,7 @@ Use three arms for the same case:
 - **B** — tuned frontier workflow without Gremlins.
 - **C** — Gremlins-assisted workflow.
 
-The primary comparison is **B versus C**.
+The primary comparison is **B versus C**. For the v2 evidence-loop treatment, inspect both frontier processed-token change and `frontier_direct_evidence_calls_change_pct`; the latter measures whether the mechanical retrieval burden actually moved out of the frontier loop.
 
 ## Record a run
 
