@@ -473,8 +473,12 @@ def _related_path_index(
 
     for path in selected_paths:
         add(path)
-    for path in affine_tests:
-        add(path)
+
+    # Affine tests get a ranking boost but do not bypass role quotas. Adding
+    # every matching test before role allocation made repository growth capable
+    # of crowding documentation/configuration out of the fixed-size index.
+    # Preserve the role-balanced contract first; the highest-value affine tests
+    # are then naturally selected by the test quota below.
 
     # Preserve breadth in the compact path-only index. These entries are cheap
     # and let the caller focus the next evidence request without repeating a
