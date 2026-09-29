@@ -20,7 +20,7 @@
   {
     "id": "evidence-003",
     "family": "benchmark-validation",
-    "task": "Trace how benchmark arm C verifies exactly one tagged Gremlins treatment call.",
+    "task": "Trace how benchmark arm C permits bounded repeated evidence_pack calls and validates tagged treatment usage.",
     "expected_paths": [
       "src/gremlins/frontier_runner.py",
       "src/gremlins/benchmark.py"
