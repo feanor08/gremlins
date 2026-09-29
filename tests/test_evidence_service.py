@@ -103,3 +103,62 @@ def test_evidence_pack_is_repeatable_and_model_free(tmp_path: Path):
     assert first["usage"]["local_model_called"] is False
     assert second["usage"]["local_model_called"] is False
     assert [item["path"] for item in first["files"]] == [item["path"] for item in second["files"]]
+
+
+def test_evidence_pack_focused_mode_is_compact(tmp_path: Path):
+    repo = _repo(tmp_path)
+    result = evidence_pack(
+        str(repo),
+        "Show the provider state implementation and its test.",
+        _config_for(repo),
+        detail="focused",
+        paths=["src/provider.py"],
+        terms=["local_model_called"],
+        max_files=8,
+    )
+    encoded = json.dumps(result, separators=(",", ":"))
+    assert result["request"]["detail"] == "focused"
+    assert result["request"]["result_budget_chars"] == 3600
+    assert result["request"]["max_files"] <= 4
+    assert len(result["related_paths"]) <= 12
+    assert len(result["relationships"]) <= 4
+    assert len(encoded) <= 3600
+
+
+def test_evidence_pack_broad_mode_keeps_full_budget(tmp_path: Path):
+    repo = _repo(tmp_path)
+    result = evidence_pack(
+        str(repo),
+        "Find provider state and related evidence.",
+        _config_for(repo),
+        detail="broad",
+    )
+    assert result["request"]["detail"] == "broad"
+    assert result["request"]["result_budget_chars"] == _config_for(repo).limits.max_result_evidence_chars
+
+
+def test_evidence_pack_focused_mode_requires_focus_input(tmp_path: Path):
+    repo = _repo(tmp_path)
+    try:
+        evidence_pack(
+            str(repo),
+            "Find provider state.",
+            _config_for(repo),
+            detail="focused",
+        )
+    except ValueError as exc:
+        assert "requires at least one path, term, or symbol" in str(exc)
+    else:
+        raise AssertionError("focused detail without a focus input must fail")
+
+
+def test_evidence_pack_auto_focuses_exact_inputs(tmp_path: Path):
+    repo = _repo(tmp_path)
+    result = evidence_pack(
+        str(repo),
+        "Find provider information.",
+        _config_for(repo),
+        terms=["local_model_called"],
+    )
+    assert result["request"]["detail"] == "focused"
+    assert result["request"]["result_budget_chars"] == 3600
