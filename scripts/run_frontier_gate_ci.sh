@@ -110,15 +110,24 @@ for case_id in ("repo-005", "repo-009"):
     metadata = row.get("metadata") or {}
     gremlins = row.get("gremlins") or {}
     tool_names = metadata.get("tool_names") or []
+    gremlins_tool_names = metadata.get("frontier_gremlins_tool_names") or []
     denials = metadata.get("permission_denials") or []
+    calls = int(gremlins.get("calls") or 0)
+    workers = gremlins.get("workers") or {}
 
     checks = {
         "accepted": bool(row.get("accepted")),
-        "one_gremlins_call": int(gremlins.get("calls") or 0) == 1,
+        "bounded_evidence_pack_calls": 1 <= calls <= 4,
         "no_local_model": int(gremlins.get("local_model_calls") or 0) == 0,
-        "repo_explorer_only": tool_names == ["mcp__gremlins__repo_explorer"],
+        "evidence_pack_worker_only": workers == {"evidence-pack": calls},
+        "client_saw_same_gremlins_call_count": int(row.get("frontier_gremlins_tool_calls") or 0) == calls,
+        "evidence_pack_tool_only": (
+            len(gremlins_tool_names) == calls
+            and all(name == "mcp__gremlins__evidence_pack" for name in gremlins_tool_names)
+        ),
         "no_permission_denials": len(denials) == 0,
         "no_frontier_redo": row.get("frontier_redid_search") is False,
+        "no_direct_frontier_evidence": int(row.get("frontier_direct_evidence_calls") or 0) == 0,
     }
     summary.append({"case_id": case_id, **checks})
     if not all(checks.values()):
@@ -182,6 +191,12 @@ lines = [
     f"unique_cases={gate.get('unique_cases')}",
     f"processed_token_change_pct={comparison.get('frontier_processed_tokens_change_pct')}",
     f"median_pair_token_change_pct={comparison.get('frontier_processed_tokens_median_pair_change_pct')}",
+    f"direct_tool_calls_before={comparison.get('frontier_direct_tool_calls_before')}",
+    f"direct_tool_calls_after={comparison.get('frontier_direct_tool_calls_after')}",
+    f"direct_tool_calls_change_pct={comparison.get('frontier_direct_tool_calls_change_pct')}",
+    f"direct_evidence_calls_before={comparison.get('frontier_direct_evidence_calls_before')}",
+    f"direct_evidence_calls_after={comparison.get('frontier_direct_evidence_calls_after')}",
+    f"direct_evidence_calls_change_pct={comparison.get('frontier_direct_evidence_calls_change_pct')}",
     f"acceptance_before={comparison.get('acceptance_rate_before')}",
     f"acceptance_after={comparison.get('acceptance_rate_after')}",
     f"redo_rate_after={comparison.get('redo_rate_after')}",
