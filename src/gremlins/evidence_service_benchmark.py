@@ -138,13 +138,23 @@ def run_evidence_service_benchmark(repository: str = ".") -> dict:
                 "elapsed_ms": round(elapsed_ms, 3),
             })
 
+        tracked_probe = _git(["ls-files"], workspace)
+        probe_paths = [
+            path for path in tracked_probe.stdout.splitlines()
+            if path and (workspace / path).is_file()
+        ]
+        if not probe_paths:
+            raise RuntimeError("focused evidence probe requires at least one tracked file")
+        preferred_probe = "src/gremlins/evidence_service.py"
+        focused_probe_path = (
+            preferred_probe if preferred_probe in probe_paths else probe_paths[0]
+        )
         focused = evidence_pack(
             str(workspace),
-            "Show the evidence-pack detail handling implementation.",
+            "Show focused evidence for the selected implementation file.",
             config,
             detail="focused",
-            paths=["src/gremlins/evidence_service.py"],
-            terms=["detail"],
+            paths=[focused_probe_path],
             max_files=8,
         )
         focused_probe_result_chars = len(
