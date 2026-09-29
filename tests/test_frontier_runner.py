@@ -6,6 +6,7 @@ import gremlins.benchmark as benchmark
 import gremlins.frontier_runner as frontier_runner
 from gremlins.frontier_runner import (
     _claude_benchmark_env,
+    _claude_benchmark_tool_policy,
     _claude_command,
     _codex_command,
     _ensure_clean_git_repository,
@@ -73,6 +74,43 @@ def test_invalid_frontier_run_is_rejected():
         raise AssertionError("failed client invocation must not become a benchmark record")
 
 
+def test_frontier_run_with_permission_denial_is_rejected(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr(frontier_runner, "_ensure_frontier_client_ready", lambda client: None)
+    monkeypatch.setattr(frontier_runner, "_ensure_clean_git_repository", lambda repository: tmp_path)
+    monkeypatch.setattr(frontier_runner, "_prepare_workspace", lambda *args, **kwargs: tmp_path)
+    monkeypatch.setattr(frontier_runner, "_ensure_study_provenance", lambda *args, **kwargs: {})
+    monkeypatch.setattr(
+        frontier_runner,
+        "_run_command",
+        lambda *args, **kwargs: SimpleNamespace(
+            stdout='{"type":"result","subtype":"success","is_error":false,"result":"src/gremlins/provider.py inference.lock 3.0","usage":{"input_tokens":10,"output_tokens":5},"permission_denials":[{"tool_name":"Bash"}]}',
+            stderr="",
+            returncode=0,
+        ),
+    )
+    fake_case = {
+        "id": "case-1",
+        "task": "x",
+        "expected_paths": ["src/gremlins/provider.py"],
+        "expected_claims": [["inference.lock"], ["3.0"]],
+    }
+    monkeypatch.setattr(frontier_runner, "get_pilot_case", lambda case_id: fake_case)
+    monkeypatch.setattr(benchmark, "get_pilot_case", lambda case_id: fake_case)
+
+    try:
+        frontier_runner.run_frontier_case(
+            study="permission-denial",
+            repository=str(tmp_path),
+            client="claude",
+            case_id="case-1",
+            arm="B",
+        )
+    except RuntimeError as exc:
+        assert "permission denials" in str(exc)
+    else:
+        raise AssertionError("permission-denied benchmark run must be invalid")
+
+
 def test_zero_usage_frontier_run_is_rejected():
     parsed = _parse_claude_stream(
         '{"type":"result","subtype":"success","is_error":false,"result":"answer","usage":{"input_tokens":0,"output_tokens":0}}',
@@ -106,6 +144,23 @@ def test_claude_benchmark_env_eager_loads_local_mcp(monkeypatch):
     assert env["GREMLINS_TEST_SENTINEL"] == "present"
     assert env["ENABLE_CLAUDEAI_MCP_SERVERS"] == "false"
     assert env["ENABLE_TOOL_SEARCH"] == "false"
+
+
+def test_claude_benchmark_tool_policy_is_native_read_only():
+    allowed_b, denied_b = _claude_benchmark_tool_policy("B")
+    assert allowed_b == ["Read", "Grep", "Glob"]
+    assert "Bash" in denied_b
+    assert "WebSearch" in denied_b
+    assert "Write" in denied_b
+    assert "mcp__gremlins__evidence_pack" in denied_b
+
+    allowed_c, denied_c = _claude_benchmark_tool_policy("C")
+    assert allowed_c == ["Read", "Grep", "Glob", "mcp__gremlins__evidence_pack"]
+    assert "Bash" in denied_c
+    assert "WebSearch" in denied_c
+    assert "Write" in denied_c
+    assert "mcp__gremlins__evidence_pack" not in denied_c
+    assert "mcp__gremlins__repo_explorer" in denied_c
 
 
 def test_commands_are_noninteractive_and_read_only(tmp_path: Path):
