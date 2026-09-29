@@ -353,6 +353,16 @@ _FRONTIER_EVIDENCE_TOOL_NAMES = {
     "webfetch",
     "ls",
 }
+_CLAUDE_NATIVE_READ_TOOLS = ["Read", "Grep", "Glob"]
+_CLAUDE_BLOCKED_BENCHMARK_TOOLS = [
+    "Bash",
+    "WebSearch",
+    "WebFetch",
+    "Write",
+    "Edit",
+    "NotebookEdit",
+]
+
 _FRONTIER_READ_ONLY_BASH_RE = re.compile(
     r"(?:^|[;&|()]\s*)(?:rg|grep|find|ls|cat|sed|head|tail|wc|tree)\b"
     r"|(?:^|[;&|()]\s*)git\s+(?:log|show|blame|diff|status|grep|rev-parse)\b",
@@ -837,21 +847,30 @@ def run_frontier_case(
             "mcp__gremlins__failure_triage",
         ]
         if arm == "B":
+            allowed_frontier_tools = list(_CLAUDE_NATIVE_READ_TOOLS)
             disallowed_gremlins = gremlins_tools
+            blocked_frontier_tools = list(_CLAUDE_BLOCKED_BENCHMARK_TOOLS)
         elif arm == "C":
+            allowed_frontier_tools = [
+                *_CLAUDE_NATIVE_READ_TOOLS,
+                "mcp__gremlins__evidence_pack",
+            ]
             disallowed_gremlins = [
                 name for name in gremlins_tools
                 if name != "mcp__gremlins__evidence_pack"
             ]
+            blocked_frontier_tools = list(_CLAUDE_BLOCKED_BENCHMARK_TOOLS)
         else:
+            allowed_frontier_tools = None
             disallowed_gremlins = None
+            blocked_frontier_tools = []
 
         command = _claude_command(
             prompt,
             model,
             allow_agents=(arm == "A"),
-            allowed_tools=(["mcp__gremlins__evidence_pack"] if arm == "C" else None),
-            disallowed_tools=disallowed_gremlins,
+            allowed_tools=allowed_frontier_tools,
+            disallowed_tools=[*(disallowed_gremlins or []), *blocked_frontier_tools],
             permission_mode=("dontAsk" if arm in {"B", "C"} else "plan"),
         )
     else:
@@ -888,6 +907,13 @@ def run_frontier_case(
     raw = _save_raw_run(study, case_id, arm, client, proc.stdout, proc.stderr) if save_raw else None
     try:
         _require_valid_frontier_run(client, parsed, proc.returncode, proc.stderr)
+        permission_denials = parsed.metadata.get("permission_denials")
+        if permission_denials:
+            raise RuntimeError(
+                f"{client} benchmark invocation had permission denials; "
+                "the controlled tool surface is invalid for this run: "
+                + json.dumps(permission_denials, ensure_ascii=False, separators=(",", ":"))
+            )
     except RuntimeError as exc:
         if raw:
             raise RuntimeError(
