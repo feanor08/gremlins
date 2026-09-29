@@ -71,7 +71,7 @@ def test_explicit_setup_commands_parse():
     search = parser.parse_args(["repo-search", "needle"])
     read = parser.parse_args(["code-read", "src/example.py"])
     history = parser.parse_args(["git-history", "--path", "src/example.py"])
-    evidence = parser.parse_args(["evidence-pack", "Find evidence"])
+    evidence = parser.parse_args(["evidence-pack", "Find evidence", "--detail", "focused", "--term", "needle"])
 
     assert core.func is cli.setup
     assert provider.func is cli.provider_setup
@@ -82,6 +82,8 @@ def test_explicit_setup_commands_parse():
     assert read.func is cli.run_code_read
     assert history.func is cli.run_git_history
     assert evidence.func is cli.run_evidence_pack
+    assert evidence.detail == "focused"
+    assert evidence.term == ["needle"]
 
 
 def test_install_script_bootstraps_core_only():
