@@ -304,7 +304,7 @@ For a new treatment revision, use a fresh study name. The broad→focused contra
 
 After preflight passes, run one small paired diagnostic before the breadth pass. The final answer from each arm is explicitly required to name exact repository-relative paths supporting its concrete claims because structural acceptance checks those paths.
 
-Then run one breadth-first pass with fresh v2 study names:
+Then run one breadth-first pass with fresh v3 study names:
 
 ```bash
 uv run gremlins benchmark suite \
