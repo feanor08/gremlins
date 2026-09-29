@@ -702,6 +702,16 @@ def gremlins_stats_for_tag(tag: str) -> dict:
             worker: sum(1 for row in rows if str(row.get("worker", "unknown")) == worker)
             for worker in sorted({str(row.get("worker", "unknown")) for row in rows})
         },
+        "evidence_pack_details": [
+            str(row.get("detail"))
+            for row in rows
+            if str(row.get("worker", "")) == "evidence-pack" and row.get("detail")
+        ],
+        "evidence_pack_budgets": [
+            int(row.get("result_budget_chars") or 0)
+            for row in rows
+            if str(row.get("worker", "")) == "evidence-pack"
+        ],
     }
 
 
@@ -774,8 +784,10 @@ def build_arm_prompt(
             "Use evidence_pack as the only Gremlins tool for this arm; do not call repo_explorer, repo_search, code_read, git_history, status, or failure_triage. "
             f"On every evidence_pack call pass repository='{repository}'. "
             f"The benchmark harness injects measurement_tag='{tag}' into the Gremlins MCP process, so do not invent or change the tag. "
-            "Start with a broad evidence question derived from the task. Then reason over the returned files, related_paths, relationships, and history. "
-            "If a hypothesis or missing fact needs another lookup, call evidence_pack again with a narrower task and, when useful, focused paths, exact terms, or symbols from the previous pack. "
+            "The FIRST evidence_pack call must use detail='broad'. Then reason over the returned files, related_paths, relationships, and history. "
+            "Every LATER evidence_pack call must use detail='focused' and must include at least one concrete paths, terms, or symbols value taken from the previous evidence. "
+            "Do not make a second broad call. Focused follow-ups are intentionally compact. "
+            "If a hypothesis or missing fact needs another lookup, ask a narrower question using those focused inputs. "
             "Prefer another focused evidence_pack over direct Read/Grep/Glob retrieval. "
             "Bash, web tools, and write/edit tools are unavailable in this arm. "
             "Use direct Read/Grep/Glob only if the evidence packs still lack evidence required to answer correctly. "
