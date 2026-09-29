@@ -11,6 +11,7 @@ from gremlins.frontier_runner import (
     _ensure_clean_git_repository,
     _ensure_frontier_client_ready,
     _ensure_study_provenance,
+    frontier_preflight,
     _parse_claude_stream,
     _parse_codex_stream,
     _redo_marker,
@@ -215,6 +216,39 @@ def test_single_run_provenance_written_and_checked(monkeypatch, tmp_path: Path):
     assert captured["written"] == payload
 
 
+def test_frontier_preflight_checks_wrapper_registration_and_tool_surface(monkeypatch, tmp_path: Path):
+    wrapper = tmp_path / "gremlins-mcp"
+    runtime = tmp_path / "runtime"
+    runtime.mkdir()
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    wrapper.write_text(
+        f"#!/bin/sh\nexport GREMLINS_ROOT='{runtime}'\nexec python -m gremlins.server\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(frontier_runner.Path, "expanduser", lambda self: wrapper if str(self) == "~/.local/bin/gremlins-mcp" else self)
+    monkeypatch.setattr(frontier_runner, "project_root", lambda: runtime)
+    monkeypatch.setattr(frontier_runner, "_ensure_frontier_client_ready", lambda client: None)
+    monkeypatch.setattr(frontier_runner, "_ensure_clean_git_repository", lambda repository: repo)
+    monkeypatch.setattr(frontier_runner, "check_wrapper", lambda path: {
+        "ok": True,
+        "tools": ["evidence_pack", "repo_search"],
+        "missing_tools": [],
+    })
+    monkeypatch.setattr(frontier_runner, "check_python_module", lambda: {
+        "ok": True,
+        "tools": ["evidence_pack"],
+        "missing_tools": [],
+    })
+    monkeypatch.setattr(frontier_runner, "_mcp_registration_state", lambda client: {"ok": True})
+
+    result = frontier_preflight(repo, "claude")
+    assert result["ok"] is True
+    assert result["checks"]["evidence_pack_present"] is True
+    assert result["frontier_model_calls"] == 0
+
+
 def test_claude_auth_preflight_rejects_logged_out_client(monkeypatch):
     monkeypatch.setattr(frontier_runner.shutil, "which", lambda client: "/usr/local/bin/claude")
     monkeypatch.setattr(
@@ -325,6 +359,7 @@ def test_codex_rejects_unknown_gremlins_mode(tmp_path: Path):
 
 
 def test_c_arm_without_gremlins_call_is_invalid(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr(frontier_runner, "frontier_preflight", lambda repository, client: {"ok": True})
     monkeypatch.setattr(frontier_runner, "_ensure_frontier_client_ready", lambda client: None)
     monkeypatch.setattr(frontier_runner, "_ensure_clean_git_repository", lambda repository: tmp_path)
     monkeypatch.setattr(frontier_runner, "_prepare_workspace", lambda *args, **kwargs: tmp_path)
@@ -371,6 +406,7 @@ def test_c_arm_without_gremlins_call_is_invalid(monkeypatch, tmp_path: Path):
 
 
 def test_c_arm_allows_bounded_repeated_evidence_pack_calls(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr(frontier_runner, "frontier_preflight", lambda repository, client: {"ok": True})
     monkeypatch.setattr(frontier_runner, "_ensure_frontier_client_ready", lambda client: None)
     monkeypatch.setattr(frontier_runner, "_ensure_clean_git_repository", lambda repository: tmp_path)
     monkeypatch.setattr(frontier_runner, "_prepare_workspace", lambda *args, **kwargs: tmp_path)
@@ -419,6 +455,7 @@ def test_c_arm_allows_bounded_repeated_evidence_pack_calls(monkeypatch, tmp_path
 
 
 def test_c_arm_uses_observed_frontier_evidence_for_redo(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr(frontier_runner, "frontier_preflight", lambda repository, client: {"ok": True})
     monkeypatch.setattr(frontier_runner, "_ensure_frontier_client_ready", lambda client: None)
     monkeypatch.setattr(frontier_runner, "_ensure_clean_git_repository", lambda repository: tmp_path)
     monkeypatch.setattr(frontier_runner, "_prepare_workspace", lambda *args, **kwargs: tmp_path)
@@ -468,6 +505,7 @@ def test_c_arm_uses_observed_frontier_evidence_for_redo(monkeypatch, tmp_path: P
 
 
 def test_c_arm_rejects_more_than_four_evidence_pack_calls(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr(frontier_runner, "frontier_preflight", lambda repository, client: {"ok": True})
     monkeypatch.setattr(frontier_runner, "_ensure_frontier_client_ready", lambda client: None)
     monkeypatch.setattr(frontier_runner, "_ensure_clean_git_repository", lambda repository: tmp_path)
     monkeypatch.setattr(frontier_runner, "_prepare_workspace", lambda *args, **kwargs: tmp_path)
@@ -511,6 +549,35 @@ def test_c_arm_rejects_more_than_four_evidence_pack_calls(monkeypatch, tmp_path:
         assert "exceeded the four-call evidence-loop treatment bound" in str(exc)
     else:
         raise AssertionError("C arm with more than four evidence_pack calls must be rejected")
+
+
+def test_single_run_rejects_duplicate_case_arm_iteration_without_force(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr(frontier_runner, "_ensure_frontier_client_ready", lambda client: None)
+    monkeypatch.setattr(frontier_runner, "_ensure_clean_git_repository", lambda repository: tmp_path)
+    monkeypatch.setattr(frontier_runner, "load_records", lambda study: [
+        {"case_id": "case-1", "arm": "B", "iteration": 1}
+    ])
+    fake_case = {
+        "id": "case-1",
+        "task": "x",
+        "expected_paths": [],
+        "expected_claims": [],
+    }
+    monkeypatch.setattr(frontier_runner, "get_pilot_case", lambda case_id: fake_case)
+
+    try:
+        frontier_runner.run_frontier_case(
+            study="dup",
+            repository=str(tmp_path),
+            client="claude",
+            case_id="case-1",
+            arm="B",
+            iteration=1,
+        )
+    except RuntimeError as exc:
+        assert "already contains case-1/B/r1" in str(exc)
+    else:
+        raise AssertionError("duplicate manual benchmark run must be rejected")
 
 
 def test_suite_resumes_existing_case_arm(monkeypatch, tmp_path: Path):
