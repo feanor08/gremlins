@@ -62,6 +62,10 @@ EOF
   claude mcp add --scope user gremlins -- "$HOME/.local/bin/gremlins-mcp"
   claude mcp list
 
+  echo
+  echo "===== ZERO-TOKEN FRONTIER PREFLIGHT ====="
+  uv run gremlins benchmark frontier-preflight --repository . --client claude
+
   run_diag_case() {
     local case_id="$1"
     local arm="$2"
