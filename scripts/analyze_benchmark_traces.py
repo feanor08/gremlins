@@ -75,43 +75,140 @@ def _input_text(tool_input: dict) -> str:
     return json.dumps(tool_input, ensure_ascii=False, separators=(",", ":"))
 
 
+def _is_gremlins_use(use: dict) -> bool:
+    return str(use.get("name") or "").startswith("mcp__gremlins__")
+
+
+def _is_direct_evidence_use(use: dict) -> bool:
+    return str(use.get("name") or "") in {"Read", "Grep", "Glob", "Search", "Find"}
+
+
+def _safe_json_object(text: str) -> dict | None:
+    try:
+        value = json.loads(text)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def _result_paths(result_text: str) -> list[str]:
+    parsed = _safe_json_object(result_text)
+    if parsed is None:
+        return sorted(_paths_from_result(result_text))
+
+    paths: list[str] = []
+    for key in ("files", "related_paths"):
+        values = parsed.get(key)
+        if not isinstance(values, list):
+            continue
+        for item in values:
+            if not isinstance(item, dict):
+                continue
+            path = item.get("path")
+            if isinstance(path, str) and path and path not in paths:
+                paths.append(path)
+    for item in parsed.get("relationships") or []:
+        if not isinstance(item, dict):
+            continue
+        for key in ("source", "test", "source_path", "test_path"):
+            path = item.get(key)
+            if isinstance(path, str) and path and path not in paths:
+                paths.append(path)
+    return paths
+
+
+def _gremlins_call_detail(use: dict, result_text: str, call_number: int) -> dict:
+    tool_input = dict(use.get("input") or {})
+    parsed = _safe_json_object(result_text)
+    request = parsed.get("request") if isinstance(parsed, dict) and isinstance(parsed.get("request"), dict) else {}
+    return {
+        "call_number": call_number,
+        "name": use.get("name"),
+        "event_index": use.get("event_index"),
+        "task": tool_input.get("task"),
+        "detail": tool_input.get("detail") or request.get("detail"),
+        "paths": list(tool_input.get("paths") or []),
+        "terms": list(tool_input.get("terms") or []),
+        "symbols": list(tool_input.get("symbols") or []),
+        "max_files": tool_input.get("max_files"),
+        "result_chars": len(result_text),
+        "result_budget_chars": request.get("result_budget_chars"),
+        "returned_paths": _result_paths(result_text),
+        "result_excerpt": result_text[:3000],
+    }
+
+
+def _direct_use_detail(use: dict, phase: str) -> dict:
+    return {
+        "name": use.get("name"),
+        "event_index": use.get("event_index"),
+        "phase": phase,
+        "input": dict(use.get("input") or {}),
+    }
+
+
 def analyze_trace(path: Path) -> dict:
     events = _json_lines(path)
     final = next((e for e in reversed(events) if e.get("type") == "result"), {})
     uses = _tool_uses(events)
     results = _tool_results(events)
 
-    gremlins_indexes = [
+    gremlins_positions = [
         index for index, use in enumerate(uses)
-        if use.get("name") == "mcp__gremlins__repo_explorer"
+        if _is_gremlins_use(use)
     ]
-    first_gremlins = gremlins_indexes[0] if gremlins_indexes else None
-    gremlins_result_chars = 0
-    gremlins_input: dict = {}
-    gremlins_result_excerpt = ""
-    returned_paths: set[str] = set()
-    if first_gremlins is not None:
-        use = uses[first_gremlins]
-        gremlins_input = dict(use.get("input") or {})
-        tool_id = use.get("id")
-        if isinstance(tool_id, str):
-            result_text = results.get(tool_id, "")
-            gremlins_result_chars = len(result_text)
-            gremlins_result_excerpt = result_text[:8000]
-            returned_paths = _paths_from_result(result_text)
+    evidence_pack_positions = [
+        index for index, use in enumerate(uses)
+        if use.get("name") == "mcp__gremlins__evidence_pack"
+    ]
+    first_gremlins = gremlins_positions[0] if gremlins_positions else None
+    last_gremlins = gremlins_positions[-1] if gremlins_positions else None
 
-    post_gremlins = uses[first_gremlins + 1 :] if first_gremlins is not None else []
-    verification_uses: list[dict] = []
-    for use in post_gremlins:
-        if use.get("name") not in {"Bash", "Read", "Grep"}:
+    gremlins_calls: list[dict] = []
+    all_returned_paths: set[str] = set()
+    for call_number, use_index in enumerate(gremlins_positions, 1):
+        use = uses[use_index]
+        tool_id = use.get("id")
+        result_text = results.get(tool_id, "") if isinstance(tool_id, str) else ""
+        detail = _gremlins_call_detail(use, result_text, call_number)
+        gremlins_calls.append(detail)
+        all_returned_paths.update(detail["returned_paths"])
+
+    direct_evidence: list[dict] = []
+    for index, use in enumerate(uses):
+        if not _is_direct_evidence_use(use):
             continue
-        payload = _input_text(use.get("input") or {})
-        touched = sorted(path for path in returned_paths if path and path in payload)
+        if first_gremlins is None or index < first_gremlins:
+            phase = "before-gremlins"
+        elif last_gremlins is not None and index > last_gremlins:
+            phase = "after-final-gremlins"
+        else:
+            phase = "between-gremlins"
+        direct_evidence.append(_direct_use_detail(use, phase))
+
+    post_first = [
+        item for item in direct_evidence
+        if item["phase"] in {"between-gremlins", "after-final-gremlins"}
+    ]
+    after_final = [
+        item for item in direct_evidence
+        if item["phase"] == "after-final-gremlins"
+    ]
+
+    # Identify whether direct fallback re-read paths already surfaced by
+    # Gremlins. This distinguishes evidence insufficiency from redundant
+    # frontier verification.
+    redundant_fallback: list[dict] = []
+    for item in post_first:
+        payload = _input_text(item.get("input") or {})
+        touched = sorted(
+            path for path in all_returned_paths
+            if path and path in payload
+        )
         if touched:
-            verification_uses.append({
-                "name": use.get("name"),
-                "paths": touched,
-                "input": use.get("input"),
+            redundant_fallback.append({
+                **item,
+                "gremlins_returned_paths_touched": touched,
             })
 
     denials = final.get("permission_denials")
@@ -119,22 +216,40 @@ def analyze_trace(path: Path) -> dict:
         denials = []
 
     usage = final.get("usage") if isinstance(final.get("usage"), dict) else {}
+    total_gremlins_result_chars = sum(
+        int(item.get("result_chars") or 0) for item in gremlins_calls
+    )
+    evidence_pack_calls = [
+        item for item in gremlins_calls
+        if item.get("name") == "mcp__gremlins__evidence_pack"
+    ]
+
     return {
         "raw_file": str(path),
         "num_turns": final.get("num_turns"),
+        "terminal_subtype": final.get("subtype"),
+        "terminal_reason": final.get("terminal_reason"),
         "tool_sequence": [use.get("name") for use in uses],
         "tool_calls": len(uses),
         "toolsearch_calls": sum(use.get("name") == "ToolSearch" for use in uses),
-        "gremlins_calls": len(gremlins_indexes),
-        "gremlins_client_result_chars": gremlins_result_chars,
-        "gremlins_input": gremlins_input,
-        "gremlins_terms": list(gremlins_input.get("terms") or []),
-        "gremlins_symbols": list(gremlins_input.get("symbols") or []),
-        "gremlins_result_excerpt": gremlins_result_excerpt,
-        "returned_paths": sorted(returned_paths),
-        "post_gremlins_tool_calls": len(post_gremlins),
-        "post_gremlins_verification_calls": len(verification_uses),
-        "verification_uses": verification_uses,
+        "gremlins_calls": len(gremlins_positions),
+        "evidence_pack_calls": len(evidence_pack_positions),
+        "gremlins_client_result_chars": total_gremlins_result_chars,
+        "gremlins_call_details": gremlins_calls,
+        "evidence_pack_details": [
+            item.get("detail") for item in evidence_pack_calls
+        ],
+        "evidence_pack_result_chars": [
+            int(item.get("result_chars") or 0) for item in evidence_pack_calls
+        ],
+        "returned_paths": sorted(all_returned_paths),
+        "direct_evidence_calls": len(direct_evidence),
+        "direct_evidence_uses": direct_evidence,
+        "direct_evidence_after_first_gremlins": len(post_first),
+        "direct_evidence_after_final_gremlins": len(after_final),
+        "after_final_gremlins_uses": after_final,
+        "redundant_post_gremlins_calls": len(redundant_fallback),
+        "redundant_post_gremlins_uses": redundant_fallback,
         "permission_denials": denials,
         "usage": usage,
     }
@@ -195,7 +310,19 @@ def summarize(rows: list[dict]) -> dict:
             "toolsearch_calls": sum(int(row.get("toolsearch_calls") or 0) for row in arm_rows),
             "permission_denials": sum(len(row.get("permission_denials") or []) for row in arm_rows),
             "post_gremlins_verification_calls": sum(
-                int(row.get("post_gremlins_verification_calls") or 0) for row in arm_rows
+                int(row.get("direct_evidence_after_first_gremlins") or 0) for row in arm_rows
+            ),
+            "direct_evidence_calls": sum(
+                int(row.get("direct_evidence_calls") or 0) for row in arm_rows
+            ),
+            "direct_evidence_after_final_gremlins": sum(
+                int(row.get("direct_evidence_after_final_gremlins") or 0) for row in arm_rows
+            ),
+            "redundant_post_gremlins_calls": sum(
+                int(row.get("redundant_post_gremlins_calls") or 0) for row in arm_rows
+            ),
+            "evidence_pack_calls": sum(
+                int(row.get("evidence_pack_calls") or 0) for row in arm_rows
             ),
             "tool_sequence_counts": dict(Counter(
                 " -> ".join(str(x) for x in row.get("tool_sequence") or [])
@@ -211,6 +338,10 @@ def summarize(rows: list[dict]) -> dict:
         "toolsearch_calls": 0,
         "permission_denials": 0,
         "post_gremlins_verification_calls": 0,
+        "direct_evidence_calls": 0,
+        "direct_evidence_after_final_gremlins": 0,
+        "redundant_post_gremlins_calls": 0,
+        "evidence_pack_calls": 0,
         "tool_sequence_counts": {},
     })
     c_summary["gremlins_client_result_chars_total"] = sum(
