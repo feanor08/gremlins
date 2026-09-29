@@ -977,6 +977,40 @@ def run_frontier_case(
                 "Gremlins-assisted benchmark arm C exceeded the four-call evidence-loop treatment bound; "
                 + diagnostic
             )
+        details = [
+            str(value)
+            for value in ((local or {}).get("evidence_pack_details") or [])
+        ]
+        budgets = [
+            int(value)
+            for value in ((local or {}).get("evidence_pack_budgets") or [])
+        ]
+        if details and len(details) != calls:
+            raise RuntimeError(
+                "Gremlins-assisted benchmark arm C evidence detail telemetry is incomplete; "
+                + diagnostic
+            )
+        if details:
+            if details[0] != "broad":
+                raise RuntimeError(
+                    "Gremlins-assisted benchmark arm C must start with one broad evidence_pack; "
+                    + diagnostic
+                )
+            if any(detail != "focused" for detail in details[1:]):
+                raise RuntimeError(
+                    "Gremlins-assisted benchmark arm C follow-up evidence_pack calls must be focused; "
+                    + diagnostic
+                )
+        if budgets and len(budgets) != calls:
+            raise RuntimeError(
+                "Gremlins-assisted benchmark arm C evidence budget telemetry is incomplete; "
+                + diagnostic
+            )
+        if len(budgets) > 1 and any(budget > 3600 for budget in budgets[1:]):
+            raise RuntimeError(
+                "Gremlins-assisted benchmark arm C focused evidence packs exceeded the compact follow-up budget; "
+                + diagnostic
+            )
         client_calls = parsed.metadata.get("frontier_gremlins_tool_calls")
         client_names = [
             str(name)
@@ -1039,6 +1073,14 @@ def run_frontier_case(
         gremlins_calls=int(local["calls"]) if local else 0,
         gremlins_local_model_calls=int(local["local_model_calls"]) if local else 0,
         gremlins_result_chars=int(local["result_chars"]) if local else 0,
+        gremlins_evidence_pack_details=tuple(
+            str(value)
+            for value in ((local or {}).get("evidence_pack_details") or [])
+        ),
+        gremlins_evidence_pack_budgets=tuple(
+            int(value)
+            for value in ((local or {}).get("evidence_pack_budgets") or [])
+        ),
         notes=(
             f"automated hidden acceptance; missing_expected_paths={missing_paths}; "
             f"missing_expected_claims={missing_claims}; client_success={parsed.success}; "
