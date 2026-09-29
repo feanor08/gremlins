@@ -37,6 +37,30 @@ def test_parse_claude_stream_usage_and_result():
     assert "Agent" in result.metadata["tool_names"]
 
 
+def test_parse_claude_stream_tracks_direct_frontier_evidence_separately_from_gremlins():
+    stdout = "\n".join([
+        '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Read","id":"r1","input":{"file_path":"src/a.py"}},{"type":"tool_use","name":"mcp__gremlins__evidence_pack","id":"g1","input":{"task":"find evidence"}},{"type":"tool_use","name":"Bash","id":"b1","input":{"command":"git status --short"}}]}}',
+        '{"type":"result","subtype":"success","is_error":false,"result":"done","usage":{"input_tokens":10,"output_tokens":5}}',
+    ])
+    result = _parse_claude_stream(stdout, 0, 1.0)
+    assert result.metadata["frontier_direct_tool_calls"] == 2
+    assert result.metadata["frontier_direct_evidence_calls"] == 2
+    assert result.metadata["frontier_gremlins_tool_calls"] == 1
+
+
+def test_parse_codex_stream_tracks_command_and_gremlins_calls():
+    stdout = "\n".join([
+        '{"type":"item.completed","item":{"type":"command_execution","command":"git log -n 3"}}',
+        '{"type":"item.completed","item":{"type":"mcp_tool_call","server":"gremlins","tool":"evidence_pack"}}',
+        '{"type":"item.completed","item":{"type":"agent_message","text":"done"}}',
+        '{"type":"turn.completed","usage":{"input_tokens":100,"cached_input_tokens":40,"output_tokens":20}}',
+    ])
+    result = _parse_codex_stream(stdout, 0, 1.0)
+    assert result.metadata["frontier_direct_tool_calls"] == 1
+    assert result.metadata["frontier_direct_evidence_calls"] == 1
+    assert result.metadata["frontier_gremlins_tool_calls"] == 1
+
+
 def test_invalid_frontier_run_is_rejected():
     parsed = _parse_claude_stream("", 2, 0.1)
     try:
@@ -101,15 +125,15 @@ def test_commands_are_noninteractive_and_read_only(tmp_path: Path):
     claude_c = _claude_command(
         "task",
         "model-x",
-        allowed_tools=["mcp__gremlins__repo_explorer"],
-        disallowed_tools=["mcp__gremlins__repo_search", "mcp__gremlins__code_read"],
+        allowed_tools=["mcp__gremlins__evidence_pack"],
+        disallowed_tools=["mcp__gremlins__repo_explorer", "mcp__gremlins__repo_search"],
         permission_mode="dontAsk",
     )
     assert "--allowedTools" in claude_c
-    assert "mcp__gremlins__repo_explorer" in claude_c
+    assert "mcp__gremlins__evidence_pack" in claude_c
     assert "--disallowedTools" in claude_c
+    assert "mcp__gremlins__repo_explorer" in claude_c
     assert "mcp__gremlins__repo_search" in claude_c
-    assert "mcp__gremlins__code_read" in claude_c
     assert claude_c.index("task") < claude_c.index("--allowedTools")
     assert claude_c[claude_c.index("--permission-mode") + 1] == "dontAsk"
 
@@ -134,10 +158,10 @@ def test_commands_are_noninteractive_and_read_only(tmp_path: Path):
         "task",
         tmp_path,
         "model-y",
-        gremlins_mode="repo-explorer-only",
+        gremlins_mode="evidence-pack-only",
     )
     assert "mcp_servers.gremlins.enabled=true" in codex_c
-    assert 'mcp_servers.gremlins.enabled_tools=["repo_explorer"]' in codex_c
+    assert 'mcp_servers.gremlins.enabled_tools=["evidence_pack"]' in codex_c
 
 
 def test_structural_acceptance_and_redo_marker():
@@ -321,6 +345,7 @@ def test_c_arm_without_gremlins_call_is_invalid(monkeypatch, tmp_path: Path):
         "result_chars": 0,
         "elapsed_seconds": 0,
         "statuses": {},
+        "workers": {},
     })
     fake_case = {
         "id": "case-1",
@@ -340,12 +365,12 @@ def test_c_arm_without_gremlins_call_is_invalid(monkeypatch, tmp_path: Path):
             arm="C",
         )
     except RuntimeError as exc:
-        assert "without any tagged Gremlins calls" in str(exc)
+        assert "without any tagged evidence_pack calls" in str(exc)
     else:
         raise AssertionError("C arm without Gremlins calls must be rejected")
 
 
-def test_c_arm_with_repeated_gremlins_calls_is_invalid(monkeypatch, tmp_path: Path):
+def test_c_arm_allows_bounded_repeated_evidence_pack_calls(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(frontier_runner, "_ensure_frontier_client_ready", lambda client: None)
     monkeypatch.setattr(frontier_runner, "_ensure_clean_git_repository", lambda repository: tmp_path)
     monkeypatch.setattr(frontier_runner, "_prepare_workspace", lambda *args, **kwargs: tmp_path)
@@ -366,6 +391,51 @@ def test_c_arm_with_repeated_gremlins_calls_is_invalid(monkeypatch, tmp_path: Pa
         "result_chars": 100,
         "elapsed_seconds": 0.1,
         "statuses": {"complete": 2},
+        "workers": {"evidence-pack": 2},
+    })
+    monkeypatch.setattr(frontier_runner, "append_record", lambda study, record: tmp_path / "study.jsonl")
+    fake_case = {
+        "id": "case-1",
+        "task": "x",
+        "expected_paths": ["src/gremlins/provider.py"],
+        "expected_claims": [["ProviderBusy"], ["busy"]],
+    }
+    monkeypatch.setattr(frontier_runner, "get_pilot_case", lambda case_id: fake_case)
+    monkeypatch.setattr(benchmark, "get_pilot_case", lambda case_id: fake_case)
+
+    result = frontier_runner.run_frontier_case(
+        study="repeated-c",
+        repository=str(tmp_path),
+        client="claude",
+        case_id="case-1",
+        arm="C",
+    )
+    assert result["gremlins"]["calls"] == 2
+    assert result["accepted"] is True
+
+
+def test_c_arm_rejects_more_than_four_evidence_pack_calls(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr(frontier_runner, "_ensure_frontier_client_ready", lambda client: None)
+    monkeypatch.setattr(frontier_runner, "_ensure_clean_git_repository", lambda repository: tmp_path)
+    monkeypatch.setattr(frontier_runner, "_prepare_workspace", lambda *args, **kwargs: tmp_path)
+    monkeypatch.setattr(frontier_runner, "_ensure_study_provenance", lambda *args, **kwargs: {})
+    monkeypatch.setattr(
+        frontier_runner,
+        "_run_command",
+        lambda *args, **kwargs: SimpleNamespace(
+            stdout='{"type":"result","subtype":"success","is_error":false,"result":"src/gremlins/provider.py ProviderBusy busy FRONTIER_REDO_SEARCH=false","usage":{"input_tokens":10,"output_tokens":5}}',
+            stderr="",
+            returncode=0,
+        ),
+    )
+    monkeypatch.setattr(frontier_runner, "gremlins_stats_for_tag", lambda tag: {
+        "tag": tag,
+        "calls": 5,
+        "local_model_calls": 0,
+        "result_chars": 100,
+        "elapsed_seconds": 0.1,
+        "statuses": {"complete": 5},
+        "workers": {"evidence-pack": 5},
     })
     fake_case = {
         "id": "case-1",
@@ -378,16 +448,16 @@ def test_c_arm_with_repeated_gremlins_calls_is_invalid(monkeypatch, tmp_path: Pa
 
     try:
         frontier_runner.run_frontier_case(
-            study="repeated-c",
+            study="too-many-c",
             repository=str(tmp_path),
             client="claude",
             case_id="case-1",
             arm="C",
         )
     except RuntimeError as exc:
-        assert "exactly one tagged repo_explorer call" in str(exc)
+        assert "exceeded the four-call evidence-loop treatment bound" in str(exc)
     else:
-        raise AssertionError("C arm with repeated Gremlins calls must be rejected")
+        raise AssertionError("C arm with more than four evidence_pack calls must be rejected")
 
 
 def test_suite_resumes_existing_case_arm(monkeypatch, tmp_path: Path):
