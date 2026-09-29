@@ -64,6 +64,8 @@ def test_paired_report_prefers_b_to_c(monkeypatch, tmp_path: Path):
             elapsed_seconds=10,
             frontier_usage=b_usage,
             frontier_subagents=2,
+            frontier_direct_tool_calls=8,
+            frontier_direct_evidence_calls=7,
         ),
     )
     append_record(
@@ -77,6 +79,8 @@ def test_paired_report_prefers_b_to_c(monkeypatch, tmp_path: Path):
             elapsed_seconds=8,
             frontier_usage=c_usage,
             frontier_subagents=0,
+            frontier_direct_tool_calls=2,
+            frontier_direct_evidence_calls=1,
             gremlins_calls=1,
             gremlins_result_chars=3200,
         ),
@@ -89,6 +93,8 @@ def test_paired_report_prefers_b_to_c(monkeypatch, tmp_path: Path):
     assert comparison["frontier_subagents_change_pct"] == -100.0
     assert comparison["acceptance_rate_before"] == 1.0
     assert comparison["acceptance_rate_after"] == 1.0
+    assert comparison["frontier_direct_tool_calls_change_pct"] == -75.0
+    assert comparison["frontier_direct_evidence_calls_change_pct"] == -85.71
 
 
 def test_parse_provider_usage_shapes():
@@ -191,23 +197,27 @@ def test_tagged_gremlins_stats(monkeypatch, tmp_path: Path):
     assert stats["local_model_calls"] == 1
     assert stats["result_chars"] == 5000
     assert stats["elapsed_seconds"] == 3.25
+    assert stats["workers"] == {"repo-explorer": 1, "triage": 1}
 
 
 def test_benchmark_prompt_carries_measurement_tag():
     prompt = build_arm_prompt("repo-001", "C", repository="/tmp/example")
     assert prompt["measurement_tag"] == "pilot:repo-001:C:r1"
     assert prompt["iteration"] == 1
-    assert "mcp__gremlins__repo_explorer" in prompt["prompt"]
+    assert "mcp__gremlins__evidence_pack" in prompt["prompt"]
     assert "measurement_tag='pilot:repo-001:C:r1'" in prompt["prompt"]
+    assert "repository='/tmp/example'" in prompt["prompt"]
     assert "ProviderBusy" in prompt["prompt"]
     assert "status = \"busy\"" not in prompt["prompt"]
-    assert "Choose a small set of exact terms" in prompt["prompt"]
+    assert "no more than four Gremlins calls" in prompt["prompt"]
 
 
-def test_c_prompt_does_not_treat_truncation_as_automatic_verification():
+def test_c_prompt_prefers_iterative_evidence_pack_before_frontier_redo():
     prompt = build_arm_prompt("repo-001", "C", repository="/tmp/example")["prompt"]
-    assert "A truncated result is not by itself a reason to verify" in prompt
-    assert "evidence needed for the answer is actually missing" in prompt
+    assert "call evidence_pack again with a narrower task" in prompt
+    assert "Prefer another focused evidence_pack over direct Read/Grep/Glob/Bash/Git retrieval" in prompt
+    assert "FRONTIER_REDO_SEARCH=true" in prompt
+    assert "Gremlins supplies evidence, not root-cause or architecture conclusions" in prompt
 
 
 def test_next_missing_run_prefers_b_then_c(monkeypatch, tmp_path: Path):
