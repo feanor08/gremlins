@@ -146,6 +146,7 @@ class BenchmarkRecord:
     gremlins_result_chars: int = 0
     gremlins_evidence_pack_details: tuple[str, ...] = ()
     gremlins_evidence_pack_budgets: tuple[int, ...] = ()
+    gremlins_evidence_pack_result_chars: tuple[int, ...] = ()
     notes: str = ""
     cost_usd: float | None = None
     iteration: int = 1
@@ -366,6 +367,7 @@ def _paired(rows: list[dict], before_arm: str, after_arm: str) -> dict:
             "gremlins_result_chars_after": int(a.get("gremlins_result_chars") or 0),
             "gremlins_evidence_pack_details_after": list(a.get("gremlins_evidence_pack_details") or []),
             "gremlins_evidence_pack_budgets_after": list(a.get("gremlins_evidence_pack_budgets") or []),
+            "gremlins_evidence_pack_result_chars_after": list(a.get("gremlins_evidence_pack_result_chars") or []),
         })
 
     comparison = {
@@ -713,6 +715,11 @@ def gremlins_stats_for_tag(tag: str) -> dict:
         ],
         "evidence_pack_budgets": [
             int(row.get("result_budget_chars") or 0)
+            for row in rows
+            if str(row.get("worker", "")) == "evidence-pack"
+        ],
+        "evidence_pack_result_chars": [
+            int(row.get("result_chars") or 0)
             for row in rows
             if str(row.get("worker", "")) == "evidence-pack"
         ],
