@@ -30,6 +30,7 @@
   uv run pytest -q
   uv run gremlins mcp-smoke
   uv run gremlins eval
+  uv run gremlins benchmark evidence-service --repository .
   uv run gremlins benchmark pilot-local --repository .
 
   echo
