@@ -223,6 +223,10 @@ def analyze_trace(path: Path) -> dict:
         item for item in gremlins_calls
         if item.get("name") == "mcp__gremlins__evidence_pack"
     ]
+    first_call = gremlins_calls[0] if gremlins_calls else {}
+    first_input = {}
+    if gremlins_positions:
+        first_input = dict(uses[gremlins_positions[0]].get("input") or {})
 
     return {
         "raw_file": str(path),
@@ -236,6 +240,11 @@ def analyze_trace(path: Path) -> dict:
         "evidence_pack_calls": len(evidence_pack_positions),
         "gremlins_client_result_chars": total_gremlins_result_chars,
         "gremlins_call_details": gremlins_calls,
+        # Backward-compatible single-call fields retained for older studies.
+        "gremlins_input": first_input,
+        "gremlins_terms": list(first_input.get("terms") or []),
+        "gremlins_symbols": list(first_input.get("symbols") or []),
+        "gremlins_result_excerpt": first_call.get("result_excerpt", ""),
         "evidence_pack_details": [
             item.get("detail") for item in evidence_pack_calls
         ],
