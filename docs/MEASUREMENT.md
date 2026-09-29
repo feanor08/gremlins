@@ -300,7 +300,7 @@ uv run gremlins benchmark frontier-preflight \
 
 The preflight verifies client readiness, clean benchmark source, the installed Gremlins MCP wrapper, wrapper/runtime-root freshness, the real MCP tool surface including `evidence_pack`, and client MCP registration. It makes **zero frontier-model calls**. A B/C suite now runs this preflight before any arm, so a broken C treatment cannot spend quota on B baselines first.
 
-For a new treatment revision, use a fresh study name. A single-case `benchmark run` refuses to append a duplicate case/arm/iteration unless `--force` is explicit. `benchmark clear --study NAME` removes the study records, provenance metadata, and saved raw streams for that study.
+For a new treatment revision, use a fresh study name. The broad→focused contract is treatment **v3**; do not append it to any v2 study because those C arms allowed repeated broad packs. A single-case `benchmark run` refuses to append a duplicate case/arm/iteration unless `--force` is explicit. `benchmark clear --study NAME` removes the study records, provenance metadata, and saved raw streams for that study.
 
 After preflight passes, run one small paired diagnostic before the breadth pass. The final answer from each arm is explicitly required to name exact repository-relative paths supporting its concrete claims because structural acceptance checks those paths.
 
@@ -308,7 +308,7 @@ Then run one breadth-first pass with fresh v2 study names:
 
 ```bash
 uv run gremlins benchmark suite \
-  --study mac-claude-evidence-loop-v2 \
+  --study mac-claude-evidence-loop-v3 \
   --repository . \
   --client claude \
   --include-a \
@@ -316,7 +316,7 @@ uv run gremlins benchmark suite \
   --save-raw
 
 uv run gremlins benchmark suite \
-  --study mac-codex-evidence-loop-v2 \
+  --study mac-codex-evidence-loop-v3 \
   --repository . \
   --client codex \
   --include-a \
@@ -327,11 +327,11 @@ uv run gremlins benchmark suite \
 Then inspect:
 
 ```bash
-uv run gremlins benchmark report --study mac-claude-evidence-loop-v2
-uv run gremlins benchmark gate --study mac-claude-evidence-loop-v2
+uv run gremlins benchmark report --study mac-claude-evidence-loop-v3
+uv run gremlins benchmark gate --study mac-claude-evidence-loop-v3
 
-uv run gremlins benchmark report --study mac-codex-evidence-loop-v2
-uv run gremlins benchmark gate --study mac-codex-evidence-loop-v2
+uv run gremlins benchmark report --study mac-codex-evidence-loop-v3
+uv run gremlins benchmark gate --study mac-codex-evidence-loop-v3
 ```
 
 If a client is close to the gate or results are noisy, repeat the same study with `--repeats 2`; the suite resumes the missing second iteration without discarding the first.
