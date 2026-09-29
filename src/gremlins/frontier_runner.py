@@ -985,23 +985,22 @@ def run_frontier_case(
             int(value)
             for value in ((local or {}).get("evidence_pack_budgets") or [])
         ]
-        if details and len(details) != calls:
+        if len(details) != calls:
             raise RuntimeError(
                 "Gremlins-assisted benchmark arm C evidence detail telemetry is incomplete; "
                 + diagnostic
             )
-        if details:
-            if details[0] != "broad":
-                raise RuntimeError(
-                    "Gremlins-assisted benchmark arm C must start with one broad evidence_pack; "
-                    + diagnostic
-                )
-            if any(detail != "focused" for detail in details[1:]):
-                raise RuntimeError(
-                    "Gremlins-assisted benchmark arm C follow-up evidence_pack calls must be focused; "
-                    + diagnostic
-                )
-        if budgets and len(budgets) != calls:
+        if details[0] != "broad":
+            raise RuntimeError(
+                "Gremlins-assisted benchmark arm C must start with one broad evidence_pack; "
+                + diagnostic
+            )
+        if any(detail != "focused" for detail in details[1:]):
+            raise RuntimeError(
+                "Gremlins-assisted benchmark arm C follow-up evidence_pack calls must be focused; "
+                + diagnostic
+            )
+        if len(budgets) != calls:
             raise RuntimeError(
                 "Gremlins-assisted benchmark arm C evidence budget telemetry is incomplete; "
                 + diagnostic
