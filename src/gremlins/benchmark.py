@@ -139,6 +139,8 @@ class BenchmarkRecord:
     frontier_usage: FrontierUsage
     frontier_subagents: int | None = None
     frontier_redid_search: bool | None = None
+    frontier_direct_tool_calls: int | None = None
+    frontier_direct_evidence_calls: int | None = None
     gremlins_calls: int = 0
     gremlins_local_model_calls: int = 0
     gremlins_result_chars: int = 0
@@ -231,6 +233,10 @@ def _arm_summary(rows: list[dict]) -> dict:
             "frontier_usage": _sum_usage([]),
             "frontier_subagents": 0,
             "frontier_redo_rate": None,
+            "frontier_direct_tool_calls": None,
+            "frontier_direct_evidence_calls": None,
+            "frontier_direct_tool_calls_known_runs": 0,
+            "frontier_direct_evidence_calls_known_runs": 0,
             "elapsed_seconds": 0.0,
             "cost_usd": None,
             "gremlins_calls": 0,
@@ -241,6 +247,16 @@ def _arm_summary(rows: list[dict]) -> dict:
     accepted = sum(bool(row.get("accepted")) for row in rows)
     redo_values = [bool(row["frontier_redid_search"]) for row in rows if row.get("frontier_redid_search") is not None]
     subagent_values = [int(row["frontier_subagents"]) for row in rows if row.get("frontier_subagents") is not None]
+    direct_tool_values = [
+        int(row["frontier_direct_tool_calls"])
+        for row in rows
+        if row.get("frontier_direct_tool_calls") is not None
+    ]
+    direct_evidence_values = [
+        int(row["frontier_direct_evidence_calls"])
+        for row in rows
+        if row.get("frontier_direct_evidence_calls") is not None
+    ]
     costs = [float(row["cost_usd"]) for row in rows if row.get("cost_usd") is not None]
     return {
         "runs": len(rows),
@@ -251,6 +267,10 @@ def _arm_summary(rows: list[dict]) -> dict:
         "frontier_subagents_known_runs": len(subagent_values),
         "frontier_redo_rate": round(sum(redo_values) / len(redo_values), 4) if redo_values else None,
         "frontier_redo_known_runs": len(redo_values),
+        "frontier_direct_tool_calls": sum(direct_tool_values) if direct_tool_values else None,
+        "frontier_direct_evidence_calls": sum(direct_evidence_values) if direct_evidence_values else None,
+        "frontier_direct_tool_calls_known_runs": len(direct_tool_values),
+        "frontier_direct_evidence_calls_known_runs": len(direct_evidence_values),
         "elapsed_seconds": round(sum(float(row.get("elapsed_seconds") or 0.0) for row in rows), 3),
         "cost_usd": round(sum(costs), 6) if costs else None,
         "gremlins_calls": sum(int(row.get("gremlins_calls") or 0) for row in rows),
@@ -317,6 +337,28 @@ def _paired(rows: list[dict], before_arm: str, after_arm: str) -> dict:
             "elapsed_change_pct": elapsed_change,
             "frontier_cost_change_pct": cost_change,
             "frontier_redid_search_after": a.get("frontier_redid_search"),
+            "frontier_direct_tool_calls_before": b.get("frontier_direct_tool_calls"),
+            "frontier_direct_tool_calls_after": a.get("frontier_direct_tool_calls"),
+            "frontier_direct_tool_calls_change_pct": (
+                _safe_pct_change(
+                    float(b["frontier_direct_tool_calls"]),
+                    float(a["frontier_direct_tool_calls"]),
+                )
+                if b.get("frontier_direct_tool_calls") is not None
+                and a.get("frontier_direct_tool_calls") is not None
+                else None
+            ),
+            "frontier_direct_evidence_calls_before": b.get("frontier_direct_evidence_calls"),
+            "frontier_direct_evidence_calls_after": a.get("frontier_direct_evidence_calls"),
+            "frontier_direct_evidence_calls_change_pct": (
+                _safe_pct_change(
+                    float(b["frontier_direct_evidence_calls"]),
+                    float(a["frontier_direct_evidence_calls"]),
+                )
+                if b.get("frontier_direct_evidence_calls") is not None
+                and a.get("frontier_direct_evidence_calls") is not None
+                else None
+            ),
             "gremlins_calls_after": int(a.get("gremlins_calls") or 0),
             "gremlins_local_model_calls_after": int(a.get("gremlins_local_model_calls") or 0),
             "gremlins_result_chars_after": int(a.get("gremlins_result_chars") or 0),
@@ -347,6 +389,28 @@ def _paired(rows: list[dict], before_arm: str, after_arm: str) -> dict:
             if before_summary["frontier_subagents"] is not None and after_summary["frontier_subagents"] is not None
             else None
         ),
+        "frontier_direct_tool_calls_change_pct": (
+            _safe_pct_change(
+                float(before_summary["frontier_direct_tool_calls"]),
+                float(after_summary["frontier_direct_tool_calls"]),
+            )
+            if before_summary["frontier_direct_tool_calls"] is not None
+            and after_summary["frontier_direct_tool_calls"] is not None
+            else None
+        ),
+        "frontier_direct_evidence_calls_change_pct": (
+            _safe_pct_change(
+                float(before_summary["frontier_direct_evidence_calls"]),
+                float(after_summary["frontier_direct_evidence_calls"]),
+            )
+            if before_summary["frontier_direct_evidence_calls"] is not None
+            and after_summary["frontier_direct_evidence_calls"] is not None
+            else None
+        ),
+        "frontier_direct_tool_calls_before": before_summary["frontier_direct_tool_calls"],
+        "frontier_direct_tool_calls_after": after_summary["frontier_direct_tool_calls"],
+        "frontier_direct_evidence_calls_before": before_summary["frontier_direct_evidence_calls"],
+        "frontier_direct_evidence_calls_after": after_summary["frontier_direct_evidence_calls"],
         "elapsed_change_pct": _safe_pct_change(
             float(before_summary["elapsed_seconds"]), float(after_summary["elapsed_seconds"])
         ),
@@ -592,6 +656,8 @@ def evaluate_gate(
         "observed": {
             "frontier_processed_tokens_change_pct": token_change,
             "frontier_cost_change_pct": cost_change,
+            "frontier_direct_tool_calls_change_pct": comparison.get("frontier_direct_tool_calls_change_pct"),
+            "frontier_direct_evidence_calls_change_pct": comparison.get("frontier_direct_evidence_calls_change_pct"),
             "acceptance_rate_before": before_accept,
             "acceptance_rate_after": after_accept,
             "redo_rate_after": redo_rate,
@@ -607,7 +673,11 @@ def evaluate_gate(
             "min_redo_coverage": min_redo_coverage,
             "max_elapsed_increase_pct": max_elapsed_increase_pct,
         },
-        "note": "This gate uses B versus C. Cost is informative when explicit prices were recorded; processed tokens remain separately visible.",
+        "note": (
+            "This gate uses B versus C. Cost is informative when explicit prices were recorded; "
+            "processed tokens remain separately visible. Direct frontier tool/evidence-call reductions "
+            "are reported for the evidence-loop treatment but are not yet pass criteria until the first paired study."
+        ),
     }
 
 
@@ -627,6 +697,10 @@ def gremlins_stats_for_tag(tag: str) -> dict:
         "statuses": {
             status: sum(1 for row in rows if row.get("status") == status)
             for status in sorted({str(row.get("status", "unknown")) for row in rows})
+        },
+        "workers": {
+            worker: sum(1 for row in rows if str(row.get("worker", "unknown")) == worker)
+            for worker in sorted({str(row.get("worker", "unknown")) for row in rows})
         },
     }
 
@@ -690,16 +764,18 @@ def build_arm_prompt(
         )
     else:
         instructions = (
-            "This is benchmark arm C (Gremlins-assisted workflow). "
-            "You MUST call the Gremlins MCP repo_explorer tool exactly once before any broad repository exploration. "
-            "In Claude Code this tool is named mcp__gremlins__repo_explorer; in other MCP clients use the equivalent repo_explorer tool exposed by the Gremlins server. "
-            "Do not call repo_explorer a second time. Use repo_explorer as the only Gremlins tool for this arm; do not call repo_search, code_read, git_history, status, or failure_triage. "
-            "Choose a small set of exact terms and/or symbols yourself from the task; do not use broad repository search first. "
-            f"Pass those terms/symbols, mode='auto', and measurement_tag='{tag}'. "
-            "Use the compact Gremlins result as your evidence starting point. "
-            "If it already contains enough evidence to answer, answer directly. "
-            "A truncated result is not by itself a reason to verify; use frontier search/read only when evidence needed for the answer is actually missing or the result is partial. "
-            "If you must redo broad retrieval, explicitly say FRONTIER_REDO_SEARCH=true at the end; otherwise say FRONTIER_REDO_SEARCH=false."
+            "This is benchmark arm C (Gremlins evidence-loop workflow). "
+            "Do not spawn subagents. Use Gremlins evidence_pack as your repository evidence interface before doing direct repository retrieval. "
+            "In Claude Code this tool is named mcp__gremlins__evidence_pack; in other MCP clients use the equivalent evidence_pack tool exposed by the Gremlins server. "
+            "You MAY call evidence_pack repeatedly as your reasoning develops, but make no more than four Gremlins calls in this arm. "
+            "Use evidence_pack as the only Gremlins tool for this arm; do not call repo_explorer, repo_search, code_read, git_history, status, or failure_triage. "
+            f"On every evidence_pack call pass repository='{repository}' and measurement_tag='{tag}'. "
+            "Start with a broad evidence question derived from the task. Then reason over the returned files, related_paths, relationships, and history. "
+            "If a hypothesis or missing fact needs another lookup, call evidence_pack again with a narrower task and, when useful, focused paths, exact terms, or symbols from the previous pack. "
+            "Prefer another focused evidence_pack over direct Read/Grep/Glob/Bash/Git retrieval. "
+            "Use direct frontier search/read/history only if the evidence packs still lack evidence required to answer correctly. "
+            "If you perform any direct repository evidence retrieval after using Gremlins, explicitly say FRONTIER_REDO_SEARCH=true at the end; otherwise say FRONTIER_REDO_SEARCH=false. "
+            "The final answer must still be your own reasoning; Gremlins supplies evidence, not root-cause or architecture conclusions."
         )
 
     return {
