@@ -185,24 +185,25 @@
   },
   {
     "id": "repo-009",
-    "task": "Find the statement that architecture expansion is gated on measurement.",
+    "task": "Find the architecture statement that major expansion is gated on measurement.",
     "terms": [
-      "Workstream G",
-      "Gate"
+      "Initial measurement gate",
+      "major architecture expansion",
+      "representative corpus"
     ],
     "expected_paths": [
       "architecture.md"
     ],
     "expected_claims": [
       [
-        "Workstream G"
+        "Initial measurement gate",
+        "measurement gate"
       ],
       [
-        "measurement"
+        "major architecture expansion"
       ],
       [
-        "gate",
-        "must pass"
+        "representative corpus"
       ]
     ]
   },
