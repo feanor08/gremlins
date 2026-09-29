@@ -210,6 +210,7 @@ def test_benchmark_prompt_carries_measurement_tag():
     assert "ProviderBusy" in prompt["prompt"]
     assert "status = \"busy\"" not in prompt["prompt"]
     assert "no more than four Gremlins calls" in prompt["prompt"]
+    assert "name the exact repository-relative path(s)" in prompt["prompt"]
 
 
 def test_c_prompt_prefers_iterative_evidence_pack_before_frontier_redo():
