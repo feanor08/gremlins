@@ -580,6 +580,32 @@ def test_single_run_rejects_duplicate_case_arm_iteration_without_force(monkeypat
         raise AssertionError("duplicate manual benchmark run must be rejected")
 
 
+def test_suite_preflight_fails_before_any_frontier_run(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr(frontier_runner, "_ensure_clean_git_repository", lambda repository: tmp_path)
+    monkeypatch.setattr(benchmark, "load_pilot_cases", lambda: [{"id": "case-1"}])
+    monkeypatch.setattr(frontier_runner, "frontier_preflight", lambda repository, client: {
+        "ok": False,
+        "frontier_model_calls": 0,
+        "checks": {"client_registration_present": False},
+    })
+
+    calls = []
+    monkeypatch.setattr(frontier_runner, "run_frontier_case", lambda **kwargs: calls.append(kwargs))
+
+    try:
+        frontier_runner.run_frontier_suite(
+            study="preflight-fail",
+            repository=str(tmp_path),
+            client="claude",
+            repeats=1,
+        )
+    except RuntimeError as exc:
+        assert "before the suite could spend any benchmark model calls" in str(exc)
+    else:
+        raise AssertionError("suite must fail closed when treatment preflight fails")
+    assert calls == []
+
+
 def test_suite_resumes_existing_case_arm(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(frontier_runner, "_ensure_clean_git_repository", lambda repository: tmp_path)
     monkeypatch.setattr(frontier_runner, "frontier_preflight", lambda repository, client: {"ok": True})
