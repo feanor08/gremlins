@@ -216,7 +216,8 @@ def test_benchmark_prompt_carries_measurement_tag():
 def test_c_prompt_prefers_iterative_evidence_pack_before_frontier_redo():
     prompt = build_arm_prompt("repo-001", "C", repository="/tmp/example")["prompt"]
     assert "call evidence_pack again with a narrower task" in prompt
-    assert "Prefer another focused evidence_pack over direct Read/Grep/Glob/Bash/Git retrieval" in prompt
+    assert "Prefer another focused evidence_pack over direct Read/Grep/Glob retrieval" in prompt
+    assert "Bash, web tools, and write/edit tools are unavailable in this arm" in prompt
     assert "FRONTIER_REDO_SEARCH=true" in prompt
     assert "Gremlins supplies evidence, not root-cause or architecture conclusions" in prompt
 
