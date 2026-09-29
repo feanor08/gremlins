@@ -242,6 +242,15 @@ def test_tagged_evidence_pack_stats_preserve_detail_sequence(monkeypatch, tmp_pa
     assert stats["result_chars"] == 11300
 
 
+def test_repo003_task_matches_implementation_scorer():
+    case = benchmark.get_pilot_case("repo-003")
+    assert "implementation" in case["task"].lower()
+    assert "function" in case["task"].lower()
+    assert "source path" in case["task"].lower()
+    assert case["expected_paths"] == ["src/gremlins/retrieval.py"]
+    assert ["effective_terms"] in case["expected_claims"]
+
+
 def test_benchmark_prompt_carries_measurement_tag():
     prompt = build_arm_prompt("repo-001", "C", repository="/tmp/example")
     assert prompt["measurement_tag"] == "pilot:repo-001:C:r1"
