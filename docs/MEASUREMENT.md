@@ -214,6 +214,20 @@ It uses an isolated clone with `evals/` removed and checks observation-derived b
 
 The evidence service is intentionally repeatable. A frontier caller may use several `evidence_pack` calls while doing RCA; the caller still owns hypotheses and causal conclusions.
 
+### Mac reference result — PASS
+
+On public main `91696e130504aa01f819c0f70bcd8f8a8db49321`, the Apple-Silicon Mac reference run passed the deterministic evidence-service gate:
+
+- cases: 9/9;
+- expected-path assertions: 16/16;
+- required test/source relationship: 1/1;
+- required history evidence: 1/1;
+- local-model calls: 0;
+- maximum result size: 7,984 / 8,000 chars;
+- elapsed time: 10.922 s.
+
+This confirms the evidence-service behavior on the intended Mac reference deployment, not only GitHub-hosted CI.
+
 ## Claude/Codex integration gate before THG
 
 THG deployment is intentionally paused until Gremlins is tested with both frontier clients on the Mac reference environment.
