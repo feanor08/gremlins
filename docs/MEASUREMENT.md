@@ -273,7 +273,25 @@ The runner now records, in addition to tokens/acceptance/elapsed time:
 
 This lets us test the core observation-derived hypothesis directly: **does the evidence loop remove parent-model retrieval operations, not merely reduce tokens?**
 
-Run one breadth-first pass first with fresh v2 study names:
+Before spending frontier quota, run the zero-token integration preflight:
+
+```bash
+uv run gremlins benchmark frontier-preflight \
+  --repository . \
+  --client claude
+
+uv run gremlins benchmark frontier-preflight \
+  --repository . \
+  --client codex
+```
+
+The preflight verifies client readiness, clean benchmark source, the installed Gremlins MCP wrapper, wrapper/runtime-root freshness, the real MCP tool surface including `evidence_pack`, and client MCP registration. It makes **zero frontier-model calls**. A B/C suite now runs this preflight before any arm, so a broken C treatment cannot spend quota on B baselines first.
+
+For a new treatment revision, use a fresh study name. A single-case `benchmark run` refuses to append a duplicate case/arm/iteration unless `--force` is explicit. `benchmark clear --study NAME` removes the study records, provenance metadata, and saved raw streams for that study.
+
+After preflight passes, run one small paired diagnostic before the breadth pass. The final answer from each arm is explicitly required to name exact repository-relative paths supporting its concrete claims because structural acceptance checks those paths.
+
+Then run one breadth-first pass with fresh v2 study names:
 
 ```bash
 uv run gremlins benchmark suite \
