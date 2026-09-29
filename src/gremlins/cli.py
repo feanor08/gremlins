@@ -489,6 +489,8 @@ def benchmark_record_cmd(args: argparse.Namespace) -> int:
         frontier_usage=usage,
         frontier_subagents=args.frontier_subagents,
         frontier_redid_search=args.frontier_redid_search,
+        frontier_direct_tool_calls=args.frontier_direct_tool_calls,
+        frontier_direct_evidence_calls=args.frontier_direct_evidence_calls,
         gremlins_calls=gremlins_calls,
         gremlins_local_model_calls=gremlins_local_model_calls,
         gremlins_result_chars=gremlins_result_chars,
@@ -790,6 +792,8 @@ def build_parser() -> argparse.ArgumentParser:
     bp.add_argument("--input-includes-cached", action="store_true")
     bp.add_argument("--frontier-subagents", type=int)
     bp.add_argument("--frontier-redid-search", action=argparse.BooleanOptionalAction, default=None)
+    bp.add_argument("--frontier-direct-tool-calls", type=int)
+    bp.add_argument("--frontier-direct-evidence-calls", type=int)
     bp.add_argument("--gremlins-tag", help="Pull Gremlins call/model/result-size metrics from jobs.jsonl for this tag")
     bp.add_argument("--gremlins-calls", type=int)
     bp.add_argument("--gremlins-local-model-calls", type=int)
