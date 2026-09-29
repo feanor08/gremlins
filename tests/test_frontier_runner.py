@@ -379,7 +379,10 @@ def test_c_arm_allows_bounded_repeated_evidence_pack_calls(monkeypatch, tmp_path
         frontier_runner,
         "_run_command",
         lambda *args, **kwargs: SimpleNamespace(
-            stdout='{"type":"result","subtype":"success","is_error":false,"result":"src/gremlins/provider.py ProviderBusy busy FRONTIER_REDO_SEARCH=false","usage":{"input_tokens":10,"output_tokens":5}}',
+            stdout="\n".join([
+                '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"mcp__gremlins__evidence_pack","id":"g1","input":{"task":"first"}},{"type":"tool_use","name":"mcp__gremlins__evidence_pack","id":"g2","input":{"task":"second"}}]}}',
+                '{"type":"result","subtype":"success","is_error":false,"result":"src/gremlins/provider.py ProviderBusy busy FRONTIER_REDO_SEARCH=false","usage":{"input_tokens":10,"output_tokens":5}}',
+            ]),
             stderr="",
             returncode=0,
         ),
@@ -411,7 +414,57 @@ def test_c_arm_allows_bounded_repeated_evidence_pack_calls(monkeypatch, tmp_path
         arm="C",
     )
     assert result["gremlins"]["calls"] == 2
+    assert result["frontier_gremlins_tool_calls"] == 2
     assert result["accepted"] is True
+
+
+def test_c_arm_uses_observed_frontier_evidence_for_redo(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr(frontier_runner, "_ensure_frontier_client_ready", lambda client: None)
+    monkeypatch.setattr(frontier_runner, "_ensure_clean_git_repository", lambda repository: tmp_path)
+    monkeypatch.setattr(frontier_runner, "_prepare_workspace", lambda *args, **kwargs: tmp_path)
+    monkeypatch.setattr(frontier_runner, "_ensure_study_provenance", lambda *args, **kwargs: {})
+    monkeypatch.setattr(
+        frontier_runner,
+        "_run_command",
+        lambda *args, **kwargs: SimpleNamespace(
+            stdout="\n".join([
+                '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"mcp__gremlins__evidence_pack","id":"g1","input":{"task":"first"}},{"type":"tool_use","name":"Read","id":"r1","input":{"file_path":"src/gremlins/provider.py"}}]}}',
+                '{"type":"result","subtype":"success","is_error":false,"result":"src/gremlins/provider.py ProviderBusy busy FRONTIER_REDO_SEARCH=false","usage":{"input_tokens":10,"output_tokens":5}}',
+            ]),
+            stderr="",
+            returncode=0,
+        ),
+    )
+    monkeypatch.setattr(frontier_runner, "gremlins_stats_for_tag", lambda tag: {
+        "tag": tag,
+        "calls": 1,
+        "local_model_calls": 0,
+        "result_chars": 100,
+        "elapsed_seconds": 0.1,
+        "statuses": {"complete": 1},
+        "workers": {"evidence-pack": 1},
+    })
+    monkeypatch.setattr(frontier_runner, "append_record", lambda study, record: tmp_path / "study.jsonl")
+    fake_case = {
+        "id": "case-1",
+        "task": "x",
+        "expected_paths": ["src/gremlins/provider.py"],
+        "expected_claims": [["ProviderBusy"], ["busy"]],
+    }
+    monkeypatch.setattr(frontier_runner, "get_pilot_case", lambda case_id: fake_case)
+    monkeypatch.setattr(benchmark, "get_pilot_case", lambda case_id: fake_case)
+
+    result = frontier_runner.run_frontier_case(
+        study="observed-redo",
+        repository=str(tmp_path),
+        client="claude",
+        case_id="case-1",
+        arm="C",
+    )
+    assert result["frontier_direct_evidence_calls"] == 1
+    assert result["frontier_redid_search"] is True
+    assert result["frontier_reported_redo_marker"] is False
+    assert result["frontier_redo_marker_matches_observed"] is False
 
 
 def test_c_arm_rejects_more_than_four_evidence_pack_calls(monkeypatch, tmp_path: Path):
