@@ -761,7 +761,8 @@ def build_arm_prompt(
         instructions = (
             "This is benchmark arm B (tuned frontier-only workflow). "
             "Do not use Gremlins and do not spawn subagents. "
-            "Use direct exact search, bounded reads, and Git history only as needed. "
+            "Use only the native read-only repository tools Read, Grep, and Glob. "
+            "Bash, web tools, write/edit tools, Gremlins, and subagents are unavailable in this arm. "
             "Keep retrieved context narrow and avoid repeating searches."
         )
     else:
@@ -775,8 +776,9 @@ def build_arm_prompt(
             f"The benchmark harness injects measurement_tag='{tag}' into the Gremlins MCP process, so do not invent or change the tag. "
             "Start with a broad evidence question derived from the task. Then reason over the returned files, related_paths, relationships, and history. "
             "If a hypothesis or missing fact needs another lookup, call evidence_pack again with a narrower task and, when useful, focused paths, exact terms, or symbols from the previous pack. "
-            "Prefer another focused evidence_pack over direct Read/Grep/Glob/Bash/Git retrieval. "
-            "Use direct frontier search/read/history only if the evidence packs still lack evidence required to answer correctly. "
+            "Prefer another focused evidence_pack over direct Read/Grep/Glob retrieval. "
+            "Bash, web tools, and write/edit tools are unavailable in this arm. "
+            "Use direct Read/Grep/Glob only if the evidence packs still lack evidence required to answer correctly. "
             "If you perform any direct repository evidence retrieval after using Gremlins, explicitly say FRONTIER_REDO_SEARCH=true at the end; otherwise say FRONTIER_REDO_SEARCH=false. "
             "The final answer must still be your own reasoning; Gremlins supplies evidence, not root-cause or architecture conclusions."
         )
