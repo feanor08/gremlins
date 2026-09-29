@@ -39,6 +39,7 @@ from .benchmark import (
     next_missing_run,
     run_local_pilot,
     study_path,
+    study_metadata_path,
 )
 
 
@@ -425,6 +426,7 @@ def benchmark_run_cmd(args: argparse.Namespace) -> int:
         include_a=args.include_a,
         save_raw=args.save_raw,
         iteration=args.iteration,
+        force=args.force,
     )
     print(json.dumps(result, indent=2))
     return 0 if result["accepted"] else 1
@@ -501,6 +503,14 @@ def benchmark_record_cmd(args: argparse.Namespace) -> int:
     path = append_record(args.study, record)
     print(json.dumps({"recorded": True, "study": args.study, "path": str(path), "gremlins": tagged, "record": record.as_dict()}, indent=2))
     return 0
+
+
+def benchmark_frontier_preflight_cmd(args: argparse.Namespace) -> int:
+    from .frontier_runner import frontier_preflight
+
+    result = frontier_preflight(args.repository, args.client)
+    print(json.dumps(result, indent=2))
+    return 0 if result.get("ok") else 2
 
 
 def benchmark_report_cmd(args: argparse.Namespace) -> int:
@@ -632,9 +642,25 @@ def benchmark_analyze_claude_observation_cmd(args: argparse.Namespace) -> int:
 
 def benchmark_clear_cmd(args: argparse.Namespace) -> int:
     path = study_path(args.study)
-    if path.exists():
-        path.unlink()
-    print(json.dumps({"cleared": True, "study": args.study, "path": str(path)}, indent=2))
+    metadata = study_metadata_path(args.study)
+    removed: list[str] = []
+    for candidate in (path, metadata):
+        if candidate.exists():
+            candidate.unlink()
+            removed.append(str(candidate))
+
+    raw_dir = path.parent / "raw" / args.study
+    if raw_dir.exists():
+        shutil.rmtree(raw_dir)
+        removed.append(str(raw_dir))
+
+    print(json.dumps({
+        "cleared": True,
+        "study": args.study,
+        "removed": removed,
+        "records_path": str(path),
+        "metadata_path": str(metadata),
+    }, indent=2))
     return 0
 
 
@@ -761,7 +787,13 @@ def build_parser() -> argparse.ArgumentParser:
     bp.add_argument("--include-a", action="store_true")
     bp.add_argument("--iteration", type=int, default=1)
     bp.add_argument("--save-raw", action="store_true", help="Opt in to saving raw client stdout/stderr locally")
+    bp.add_argument("--force", action="store_true", help="Rerun a case/arm/iteration already recorded in this study")
     bp.set_defaults(func=benchmark_run_cmd)
+
+    bp = bench.add_parser("frontier-preflight", help="Verify client auth, Gremlins MCP registration, wrapper, and evidence_pack without a frontier model call")
+    bp.add_argument("--repository", required=True)
+    bp.add_argument("--client", choices=["claude", "codex"], required=True)
+    bp.set_defaults(func=benchmark_frontier_preflight_cmd)
 
     bp = bench.add_parser("suite", help="Run the full controlled B/C pilot with fresh workspaces and counterbalanced ordering")
     bp.add_argument("--study", default="pilot")
