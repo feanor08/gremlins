@@ -52,7 +52,9 @@ uv run gremlins repo-explore \
 
 It does **not** claim a root cause, choose an architecture, design a patch, or call a model. Those judgments remain with the caller.
 
-The capability is intentionally repeatable. A reasoning caller can ask one evidence question, reason over the returned evidence, then issue another narrower request with explicit terms, symbols, or focused paths.
+The capability is intentionally repeatable. Use `detail="broad"` for the first cross-source discovery pass. Follow-up calls should use `detail="focused"` plus at least one concrete `paths`, `terms`, or `symbols` value from earlier evidence. Focused mode caps detailed files at four and the total result at 3,600 characters, while broad mode retains the normal 8,000-character reference budget. `detail="auto"` selects focused mode when exact focus inputs are supplied.
+
+This creates an explicit breadth→depth loop: the caller pays once for discovery, then asks compact questions instead of receiving another near-full evidence bundle on every reasoning step.
 
 ## MCP
 
