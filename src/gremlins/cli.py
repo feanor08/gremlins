@@ -415,19 +415,31 @@ def mcp_smoke_cmd(_: argparse.Namespace) -> int:
 def benchmark_run_cmd(args: argparse.Namespace) -> int:
     from .frontier_runner import run_frontier_case
 
-    result = run_frontier_case(
-        study=args.study,
-        repository=args.repository,
-        client=args.client,
-        case_id=args.case_id,
-        arm=args.arm,
-        model=args.model,
-        timeout_seconds=args.timeout_seconds,
-        include_a=args.include_a,
-        save_raw=args.save_raw,
-        iteration=args.iteration,
-        force=args.force,
-    )
+    try:
+        result = run_frontier_case(
+            study=args.study,
+            repository=args.repository,
+            client=args.client,
+            case_id=args.case_id,
+            arm=args.arm,
+            model=args.model,
+            timeout_seconds=args.timeout_seconds,
+            include_a=args.include_a,
+            save_raw=args.save_raw,
+            iteration=args.iteration,
+            force=args.force,
+        )
+    except (RuntimeError, ValueError) as exc:
+        print(json.dumps({
+            "benchmark": "frontier-run-v2",
+            "study": args.study,
+            "case_id": args.case_id,
+            "arm": args.arm,
+            "client": args.client,
+            "error": f"{type(exc).__name__}: {exc}",
+        }, indent=2), file=sys.stderr)
+        return 2
+
     print(json.dumps(result, indent=2))
     return 0 if result["accepted"] else 1
 
@@ -435,17 +447,27 @@ def benchmark_run_cmd(args: argparse.Namespace) -> int:
 def benchmark_suite_cmd(args: argparse.Namespace) -> int:
     from .frontier_runner import run_frontier_suite
 
-    result = run_frontier_suite(
-        study=args.study,
-        repository=args.repository,
-        client=args.client,
-        model=args.model,
-        repeats=args.repeats,
-        include_a=args.include_a,
-        timeout_seconds=args.timeout_seconds,
-        save_raw=args.save_raw,
-        force=args.force,
-    )
+    try:
+        result = run_frontier_suite(
+            study=args.study,
+            repository=args.repository,
+            client=args.client,
+            model=args.model,
+            repeats=args.repeats,
+            include_a=args.include_a,
+            timeout_seconds=args.timeout_seconds,
+            save_raw=args.save_raw,
+            force=args.force,
+        )
+    except (RuntimeError, ValueError) as exc:
+        print(json.dumps({
+            "benchmark": "frontier-suite-v2",
+            "study": args.study,
+            "client": args.client,
+            "error": f"{type(exc).__name__}: {exc}",
+        }, indent=2), file=sys.stderr)
+        return 2
+
     print(json.dumps(result, indent=2))
     return 0 if not result["execution_errors"] else 2
 
