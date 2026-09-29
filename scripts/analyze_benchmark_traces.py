@@ -47,6 +47,22 @@ def _tool_uses(events: list[dict]) -> list[dict]:
     return uses
 
 
+def _tool_result_text(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        text_parts = [
+            item.get("text")
+            for item in content
+            if isinstance(item, dict)
+            and item.get("type") == "text"
+            and isinstance(item.get("text"), str)
+        ]
+        if text_parts:
+            return "\n".join(text_parts)
+    return json.dumps(content, ensure_ascii=False, separators=(",", ":"))
+
+
 def _tool_results(events: list[dict]) -> dict[str, str]:
     out: dict[str, str] = {}
     for event in events:
@@ -56,12 +72,7 @@ def _tool_results(events: list[dict]) -> dict[str, str]:
             tool_use_id = block.get("tool_use_id")
             if not isinstance(tool_use_id, str):
                 continue
-            content = block.get("content")
-            if isinstance(content, str):
-                text = content
-            else:
-                text = json.dumps(content, ensure_ascii=False, separators=(",", ":"))
-            out[tool_use_id] = text
+            out[tool_use_id] = _tool_result_text(block.get("content"))
     return out
 
 
@@ -357,7 +368,7 @@ def summarize(rows: list[dict]) -> dict:
         int(row.get("gremlins_client_result_chars") or 0) for row in c_rows
     ) if c_rows else 0
     c_summary["runs_with_post_gremlins_verification"] = sum(
-        bool(row.get("post_gremlins_verification_calls")) for row in c_rows
+        bool(row.get("direct_evidence_after_first_gremlins")) for row in c_rows
     ) if c_rows else 0
     return summary
 
