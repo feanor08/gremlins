@@ -31,6 +31,27 @@ _STOP_WORDS = {
     "system", "using", "used", "use", "relevant", "whether", "without", "through",
 }
 _TEST_PARTS = {"test", "tests", "spec", "specs"}
+_FOCUSED_RESULT_CHARS = 3600
+_FOCUSED_MAX_FILES = 4
+_FOCUSED_RELATED_PATHS = 12
+_FOCUSED_RELATIONSHIPS = 4
+
+
+def _resolve_detail(
+    detail: str,
+    *,
+    terms: Sequence[str] | None,
+    symbols: Sequence[str] | None,
+    paths: Sequence[str] | None,
+) -> str:
+    normalized = str(detail or "auto").strip().lower()
+    if normalized not in {"auto", "broad", "focused"}:
+        raise ValueError("detail must be auto, broad, or focused")
+    if normalized == "auto":
+        return "focused" if (terms or symbols or paths) else "broad"
+    if normalized == "focused" and not (terms or symbols or paths):
+        raise ValueError("focused evidence_pack requires at least one path, term, or symbol")
+    return normalized
 
 
 def _run_git(repo: Path, args: list[str], config: Config) -> subprocess.CompletedProcess[str]:
@@ -732,13 +753,27 @@ def evidence_pack(
     include_tests: bool = True,
     include_history: bool = True,
     max_files: int = 6,
+    detail: str = "auto",
     measurement_tag: str | None = None,
 ) -> dict:
-    """Build a deterministic provenance-preserving evidence bundle."""
+    """Build a deterministic provenance-preserving evidence bundle.
+
+    detail=broad preserves cross-source breadth. detail=focused requires an
+    explicit path/term/symbol and returns a substantially smaller follow-up
+    pack. detail=auto selects focused only when exact focus inputs are present.
+    """
     started = time.monotonic()
     task = validate_task(task, config.limits.max_task_chars)
     repo = resolve_repository(repository, config)
+    resolved_detail = _resolve_detail(
+        detail,
+        terms=terms,
+        symbols=symbols,
+        paths=paths,
+    )
     max_files = max(1, min(int(max_files), 12))
+    if resolved_detail == "focused":
+        max_files = min(max_files, _FOCUSED_MAX_FILES)
 
     search_terms, matched_variants = _discovery_terms(
         repo, task, config, scope, terms, symbols
@@ -778,6 +813,7 @@ def evidence_pack(
         search_terms,
         [item["path"] for item in files],
         config,
+        limit=(_FOCUSED_RELATED_PATHS if resolved_detail == "focused" else 32),
     )
     relationships = (
         _test_relationships(
@@ -785,6 +821,7 @@ def evidence_pack(
             [item["path"] for item in files],
             search_terms,
             config,
+            limit=(_FOCUSED_RELATIONSHIPS if resolved_detail == "focused" else 10),
         )
         if include_tests
         else []
@@ -798,6 +835,18 @@ def evidence_pack(
         )
         if include_history
         else {"by_path": [], "topic": []}
+    )
+    if resolved_detail == "focused":
+        history["by_path"] = history.get("by_path", [])[:1]
+        history["topic"] = history.get("topic", [])[:1]
+        for group in [*history["by_path"], *history["topic"]]:
+            if isinstance(group, dict) and isinstance(group.get("entries"), list):
+                group["entries"] = group["entries"][:1]
+
+    result_budget = (
+        min(config.limits.max_result_evidence_chars, _FOCUSED_RESULT_CHARS)
+        if resolved_detail == "focused"
+        else config.limits.max_result_evidence_chars
     )
 
     snap = snapshot(repo, config)
@@ -813,6 +862,8 @@ def evidence_pack(
             "include_tests": bool(include_tests),
             "include_history": bool(include_history),
             "max_files": max_files,
+            "detail": resolved_detail,
+            "result_budget_chars": result_budget,
         },
         "discovery": {
             "terms": search_terms,
@@ -831,7 +882,7 @@ def evidence_pack(
             "repeatable": True,
         },
     }
-    result = _compact_pack(result, config.limits.max_result_evidence_chars)
+    result = _compact_pack(result, result_budget)
     elapsed = round(time.monotonic() - started, 3)
     result_chars = len(json.dumps(result, ensure_ascii=False, separators=(",", ":")))
     record({
@@ -842,6 +893,11 @@ def evidence_pack(
         "evidence_returned": len(result.get("files") or []),
         "relationships_returned": len(result.get("relationships") or []),
         "result_chars": result_chars,
+        "result_budget_chars": result_budget,
+        "detail": resolved_detail,
+        "focus_paths": len(paths or []),
+        "explicit_terms": len(terms or []),
+        "explicit_symbols": len(symbols or []),
         "measurement_tag": measurement_tag,
         "usage": result["usage"],
     })
