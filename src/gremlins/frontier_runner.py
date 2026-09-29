@@ -586,6 +586,37 @@ def _parse_codex_stream(stdout: str, returncode: int, elapsed_seconds: float) ->
     )
 
 
+def _claude_benchmark_tool_policy(arm: str) -> tuple[list[str] | None, list[str]]:
+    gremlins_tools = [
+        "mcp__gremlins__gremlins_status",
+        "mcp__gremlins__repo_search",
+        "mcp__gremlins__code_read",
+        "mcp__gremlins__git_history",
+        "mcp__gremlins__evidence_pack",
+        "mcp__gremlins__repo_explorer",
+        "mcp__gremlins__failure_triage",
+    ]
+    if arm == "B":
+        return (
+            list(_CLAUDE_NATIVE_READ_TOOLS),
+            [*gremlins_tools, *_CLAUDE_BLOCKED_BENCHMARK_TOOLS],
+        )
+    if arm == "C":
+        return (
+            [*_CLAUDE_NATIVE_READ_TOOLS, "mcp__gremlins__evidence_pack"],
+            [
+                *[
+                    name for name in gremlins_tools
+                    if name != "mcp__gremlins__evidence_pack"
+                ],
+                *_CLAUDE_BLOCKED_BENCHMARK_TOOLS,
+            ],
+        )
+    if arm == "A":
+        return None, []
+    raise ValueError("arm must be A, B, or C")
+
+
 def _claude_command(
     prompt: str,
     model: str | None,
@@ -837,40 +868,14 @@ def run_frontier_case(
     prompt = str(prompt_info["prompt"])
 
     if client == "claude":
-        gremlins_tools = [
-            "mcp__gremlins__gremlins_status",
-            "mcp__gremlins__repo_search",
-            "mcp__gremlins__code_read",
-            "mcp__gremlins__git_history",
-            "mcp__gremlins__evidence_pack",
-            "mcp__gremlins__repo_explorer",
-            "mcp__gremlins__failure_triage",
-        ]
-        if arm == "B":
-            allowed_frontier_tools = list(_CLAUDE_NATIVE_READ_TOOLS)
-            disallowed_gremlins = gremlins_tools
-            blocked_frontier_tools = list(_CLAUDE_BLOCKED_BENCHMARK_TOOLS)
-        elif arm == "C":
-            allowed_frontier_tools = [
-                *_CLAUDE_NATIVE_READ_TOOLS,
-                "mcp__gremlins__evidence_pack",
-            ]
-            disallowed_gremlins = [
-                name for name in gremlins_tools
-                if name != "mcp__gremlins__evidence_pack"
-            ]
-            blocked_frontier_tools = list(_CLAUDE_BLOCKED_BENCHMARK_TOOLS)
-        else:
-            allowed_frontier_tools = None
-            disallowed_gremlins = None
-            blocked_frontier_tools = []
+        allowed_frontier_tools, denied_tools = _claude_benchmark_tool_policy(arm)
 
         command = _claude_command(
             prompt,
             model,
             allow_agents=(arm == "A"),
             allowed_tools=allowed_frontier_tools,
-            disallowed_tools=[*(disallowed_gremlins or []), *blocked_frontier_tools],
+            disallowed_tools=denied_tools,
             permission_mode=("dontAsk" if arm in {"B", "C"} else "plan"),
         )
     else:
