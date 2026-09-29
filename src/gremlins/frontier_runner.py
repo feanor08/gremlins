@@ -782,7 +782,19 @@ def run_frontier_case(
         ],
     )
     accepted = bool(parsed.success and accepted)
-    redo = _redo_marker(parsed.response_text) if arm == "C" else None
+    reported_redo = _redo_marker(parsed.response_text) if arm == "C" else None
+    direct_evidence_calls = parsed.metadata.get("frontier_direct_evidence_calls")
+    observed_redo = (
+        bool(int(direct_evidence_calls))
+        if arm == "C" and direct_evidence_calls is not None
+        else None
+    )
+    redo = observed_redo if observed_redo is not None else reported_redo
+    redo_marker_matches_observed = (
+        reported_redo == observed_redo
+        if arm == "C" and reported_redo is not None and observed_redo is not None
+        else None
+    )
     tag = prompt_info.get("measurement_tag")
     local = gremlins_stats_for_tag(str(tag)) if tag else None
     if arm == "C":
@@ -851,7 +863,9 @@ def run_frontier_case(
         gremlins_result_chars=int(local["result_chars"]) if local else 0,
         notes=(
             f"automated hidden acceptance; missing_expected_paths={missing_paths}; "
-            f"missing_expected_claims={missing_claims}; client_success={parsed.success}"
+            f"missing_expected_claims={missing_claims}; client_success={parsed.success}; "
+            f"reported_redo={reported_redo}; observed_redo={observed_redo}; "
+            f"redo_marker_matches_observed={redo_marker_matches_observed}"
         ),
         cost_usd=parsed.cost_usd,
         iteration=iteration,
@@ -869,6 +883,8 @@ def run_frontier_case(
         "missing_expected_paths": missing_paths,
         "missing_expected_claims": missing_claims,
         "frontier_redid_search": redo,
+        "frontier_reported_redo_marker": reported_redo,
+        "frontier_redo_marker_matches_observed": redo_marker_matches_observed,
         "frontier_direct_tool_calls": parsed.metadata.get("frontier_direct_tool_calls"),
         "frontier_direct_evidence_calls": parsed.metadata.get("frontier_direct_evidence_calls"),
         "frontier_gremlins_tool_calls": parsed.metadata.get("frontier_gremlins_tool_calls"),
