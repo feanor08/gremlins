@@ -249,6 +249,65 @@ def _claude_tool_names(events: list[dict]) -> list[str]:
     return [str(use["name"]) for use in _claude_tool_uses(events)]
 
 
+_FRONTIER_EVIDENCE_TOOL_NAMES = {
+    "read",
+    "grep",
+    "glob",
+    "search",
+    "find",
+    "toolsearch",
+    "websearch",
+    "webfetch",
+    "ls",
+}
+_FRONTIER_READ_ONLY_BASH_RE = re.compile(
+    r"(?:^|[;&|()]\s*)(?:rg|grep|find|ls|cat|sed|head|tail|wc|tree)\b"
+    r"|(?:^|[;&|()]\s*)git\s+(?:log|show|blame|diff|status|grep|rev-parse)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_gremlins_tool_name(name: str) -> bool:
+    low = name.lower()
+    return low.startswith("mcp__gremlins__") or low.startswith("gremlins.")
+
+
+def _is_frontier_evidence_use(use: dict) -> bool:
+    name = str(use.get("name") or "").lower()
+    if name in _FRONTIER_EVIDENCE_TOOL_NAMES:
+        return True
+    if name == "bash":
+        payload = use.get("input") if isinstance(use.get("input"), dict) else {}
+        command = str(payload.get("command") or "")
+        return bool(_FRONTIER_READ_ONLY_BASH_RE.search(command))
+    return False
+
+
+def _claude_direct_tool_metrics(tool_uses: list[dict]) -> dict:
+    root = [
+        use for use in tool_uses
+        if not use.get("parent_tool_use_id")
+        and str(use.get("name") or "").lower() not in {"agent", "task"}
+    ]
+    direct = [
+        use for use in root
+        if not _is_gremlins_tool_name(str(use.get("name") or ""))
+    ]
+    evidence = [use for use in direct if _is_frontier_evidence_use(use)]
+    gremlins = [
+        use for use in root
+        if _is_gremlins_tool_name(str(use.get("name") or ""))
+    ]
+    return {
+        "frontier_direct_tool_calls": len(direct),
+        "frontier_direct_evidence_calls": len(evidence),
+        "frontier_gremlins_tool_calls": len(gremlins),
+        "frontier_direct_tool_names": [str(use.get("name") or "") for use in direct],
+        "frontier_direct_evidence_tool_names": [str(use.get("name") or "") for use in evidence],
+        "frontier_gremlins_tool_names": [str(use.get("name") or "") for use in gremlins],
+    }
+
+
 def _parse_claude_stream(stdout: str, returncode: int, elapsed_seconds: float) -> ClientRun:
     events: list[dict] = []
     for line in stdout.splitlines():
@@ -310,6 +369,7 @@ def _parse_claude_stream(stdout: str, returncode: int, elapsed_seconds: float) -
             "run_in_background": payload.get("run_in_background"),
         })
     subagent_calls = len(subagent_details)
+    direct_metrics = _claude_direct_tool_metrics(tool_uses)
     is_error = bool(final.get("is_error")) if final else False
     success = returncode == 0 and not is_error and bool(response_text)
     return ClientRun(
@@ -330,6 +390,7 @@ def _parse_claude_stream(stdout: str, returncode: int, elapsed_seconds: float) -
             "subagent_calls": subagent_calls,
             "subagent_details": subagent_details,
             "permission_denials": final.get("permission_denials") if final else None,
+            **direct_metrics,
         },
     )
 
@@ -339,6 +400,10 @@ def _parse_codex_stream(stdout: str, returncode: int, elapsed_seconds: float) ->
     response_parts: list[str] = []
     fatal = False
     usage_obj: dict = {}
+    direct_tool_calls = 0
+    direct_evidence_calls = 0
+    direct_tool_names: list[str] = []
+    gremlins_tool_names: list[str] = []
 
     for line in stdout.splitlines():
         try:
@@ -353,12 +418,43 @@ def _parse_codex_stream(stdout: str, returncode: int, elapsed_seconds: float) ->
             fatal = True
         if event_type == "turn.completed" and isinstance(event.get("usage"), dict):
             usage_obj = event["usage"]
-        if event_type == "item.completed":
-            item = event.get("item")
-            if isinstance(item, dict) and item.get("type") == "agent_message":
-                text = item.get("text")
-                if isinstance(text, str) and text.strip():
-                    response_parts.append(text.strip())
+        if event_type != "item.completed":
+            continue
+
+        item = event.get("item")
+        if not isinstance(item, dict):
+            continue
+        item_type = str(item.get("type") or "")
+
+        if item_type == "agent_message":
+            text = item.get("text")
+            if isinstance(text, str) and text.strip():
+                response_parts.append(text.strip())
+            continue
+
+        if item_type == "mcp_tool_call":
+            server = str(item.get("server") or item.get("server_name") or "")
+            tool = str(item.get("tool") or item.get("name") or "")
+            rendered = f"{server}.{tool}".strip(".")
+            if "gremlins" in server.lower() or "gremlins" in rendered.lower():
+                gremlins_tool_names.append(rendered or tool or "mcp_tool_call")
+            else:
+                direct_tool_calls += 1
+                direct_tool_names.append(rendered or tool or "mcp_tool_call")
+            continue
+
+        if item_type == "command_execution":
+            command = str(item.get("command") or "")
+            direct_tool_calls += 1
+            direct_tool_names.append("command_execution")
+            if _FRONTIER_READ_ONLY_BASH_RE.search(command):
+                direct_evidence_calls += 1
+            continue
+
+        if item_type in {"file_read", "web_search", "web_fetch"}:
+            direct_tool_calls += 1
+            direct_evidence_calls += 1
+            direct_tool_names.append(item_type)
 
     usage = normalize_usage(
         input_tokens=int(usage_obj.get("input_tokens") or 0),
@@ -376,7 +472,14 @@ def _parse_codex_stream(stdout: str, returncode: int, elapsed_seconds: float) ->
         cost_usd=None,
         raw_stdout=stdout,
         raw_stderr="",
-        metadata={"events": len(events)},
+        metadata={
+            "events": len(events),
+            "frontier_direct_tool_calls": direct_tool_calls,
+            "frontier_direct_evidence_calls": direct_evidence_calls,
+            "frontier_gremlins_tool_calls": len(gremlins_tool_names),
+            "frontier_direct_tool_names": direct_tool_names,
+            "frontier_gremlins_tool_names": gremlins_tool_names,
+        },
     )
 
 
@@ -429,15 +532,15 @@ def _codex_command(
 
     if gremlins_mode == "disabled":
         args.extend(["-c", "mcp_servers.gremlins.enabled=false"])
-    elif gremlins_mode == "repo-explorer-only":
+    elif gremlins_mode == "evidence-pack-only":
         args.extend([
             "-c",
             "mcp_servers.gremlins.enabled=true",
             "-c",
-            'mcp_servers.gremlins.enabled_tools=["repo_explorer"]',
+            'mcp_servers.gremlins.enabled_tools=["evidence_pack"]',
         ])
     elif gremlins_mode is not None:
-        raise ValueError("gremlins_mode must be disabled, repo-explorer-only, or None")
+        raise ValueError("gremlins_mode must be disabled, evidence-pack-only, or None")
 
     args.extend([
         "exec",
@@ -610,6 +713,7 @@ def run_frontier_case(
             "mcp__gremlins__repo_search",
             "mcp__gremlins__code_read",
             "mcp__gremlins__git_history",
+            "mcp__gremlins__evidence_pack",
             "mcp__gremlins__repo_explorer",
             "mcp__gremlins__failure_triage",
         ]
@@ -618,7 +722,7 @@ def run_frontier_case(
         elif arm == "C":
             disallowed_gremlins = [
                 name for name in gremlins_tools
-                if name != "mcp__gremlins__repo_explorer"
+                if name != "mcp__gremlins__evidence_pack"
             ]
         else:
             disallowed_gremlins = None
@@ -627,14 +731,14 @@ def run_frontier_case(
             prompt,
             model,
             allow_agents=(arm == "A"),
-            allowed_tools=(["mcp__gremlins__repo_explorer"] if arm == "C" else None),
+            allowed_tools=(["mcp__gremlins__evidence_pack"] if arm == "C" else None),
             disallowed_tools=disallowed_gremlins,
             permission_mode=("dontAsk" if arm in {"B", "C"} else "plan"),
         )
     else:
         codex_gremlins_mode = (
             "disabled" if arm == "B"
-            else "repo-explorer-only" if arm == "C"
+            else "evidence-pack-only" if arm == "C"
             else None
         )
         command = _codex_command(
@@ -683,23 +787,38 @@ def run_frontier_case(
     local = gremlins_stats_for_tag(str(tag)) if tag else None
     if arm == "C":
         calls = int((local or {}).get("calls") or 0)
+        workers = {
+            str(name): int(count)
+            for name, count in ((local or {}).get("workers") or {}).items()
+        }
+        local_model_calls = int((local or {}).get("local_model_calls") or 0)
         diagnostic = (
             f"tool_names={parsed.metadata.get('tool_names')}; "
             f"permission_denials={parsed.metadata.get('permission_denials')}; "
-            f"tagged_gremlins_calls={calls}"
+            f"tagged_gremlins_calls={calls}; workers={workers}; "
+            f"local_model_calls={local_model_calls}"
         )
         if raw:
             diagnostic += f"; raw_stdout={raw['stdout']}; raw_stderr={raw['stderr']}"
         if calls <= 0:
             raise RuntimeError(
-                "Gremlins-assisted benchmark arm C completed without any tagged Gremlins calls; "
+                "Gremlins-assisted benchmark arm C completed without any tagged evidence_pack calls; "
                 "treating the run as invalid rather than recording frontier-only fallback data; "
                 + diagnostic
             )
-        if calls != 1:
+        if calls > 4:
             raise RuntimeError(
-                "Gremlins-assisted benchmark arm C must contain exactly one tagged repo_explorer call; "
-                "treating repeated treatment calls as invalid; "
+                "Gremlins-assisted benchmark arm C exceeded the four-call evidence-loop treatment bound; "
+                + diagnostic
+            )
+        if workers and set(workers) != {"evidence-pack"}:
+            raise RuntimeError(
+                "Gremlins-assisted benchmark arm C used a Gremlins capability other than evidence_pack; "
+                + diagnostic
+            )
+        if local_model_calls:
+            raise RuntimeError(
+                "Gremlins-assisted benchmark arm C evidence loop must remain model-free; "
                 + diagnostic
             )
 
@@ -717,6 +836,16 @@ def run_frontier_case(
             else (0 if arm in {"B", "C"} else None)
         ),
         frontier_redid_search=redo,
+        frontier_direct_tool_calls=(
+            int(parsed.metadata["frontier_direct_tool_calls"])
+            if parsed.metadata.get("frontier_direct_tool_calls") is not None
+            else None
+        ),
+        frontier_direct_evidence_calls=(
+            int(parsed.metadata["frontier_direct_evidence_calls"])
+            if parsed.metadata.get("frontier_direct_evidence_calls") is not None
+            else None
+        ),
         gremlins_calls=int(local["calls"]) if local else 0,
         gremlins_local_model_calls=int(local["local_model_calls"]) if local else 0,
         gremlins_result_chars=int(local["result_chars"]) if local else 0,
@@ -740,6 +869,9 @@ def run_frontier_case(
         "missing_expected_paths": missing_paths,
         "missing_expected_claims": missing_claims,
         "frontier_redid_search": redo,
+        "frontier_direct_tool_calls": parsed.metadata.get("frontier_direct_tool_calls"),
+        "frontier_direct_evidence_calls": parsed.metadata.get("frontier_direct_evidence_calls"),
+        "frontier_gremlins_tool_calls": parsed.metadata.get("frontier_gremlins_tool_calls"),
         "usage": parsed.usage.__dict__,
         "cost_usd": parsed.cost_usd,
         "elapsed_seconds": round(parsed.elapsed_seconds, 3),
