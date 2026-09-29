@@ -144,6 +144,8 @@ class BenchmarkRecord:
     gremlins_calls: int = 0
     gremlins_local_model_calls: int = 0
     gremlins_result_chars: int = 0
+    gremlins_evidence_pack_details: tuple[str, ...] = ()
+    gremlins_evidence_pack_budgets: tuple[int, ...] = ()
     notes: str = ""
     cost_usd: float | None = None
     iteration: int = 1
@@ -362,6 +364,8 @@ def _paired(rows: list[dict], before_arm: str, after_arm: str) -> dict:
             "gremlins_calls_after": int(a.get("gremlins_calls") or 0),
             "gremlins_local_model_calls_after": int(a.get("gremlins_local_model_calls") or 0),
             "gremlins_result_chars_after": int(a.get("gremlins_result_chars") or 0),
+            "gremlins_evidence_pack_details_after": list(a.get("gremlins_evidence_pack_details") or []),
+            "gremlins_evidence_pack_budgets_after": list(a.get("gremlins_evidence_pack_budgets") or []),
         })
 
     comparison = {
