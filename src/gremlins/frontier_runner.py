@@ -823,6 +823,30 @@ def run_frontier_case(
                 "Gremlins-assisted benchmark arm C exceeded the four-call evidence-loop treatment bound; "
                 + diagnostic
             )
+        client_calls = parsed.metadata.get("frontier_gremlins_tool_calls")
+        client_names = [
+            str(name)
+            for name in (parsed.metadata.get("frontier_gremlins_tool_names") or [])
+        ]
+        if client_calls is not None and int(client_calls) != calls:
+            raise RuntimeError(
+                "Gremlins-assisted benchmark arm C client/tool telemetry disagrees with tagged Gremlins metrics; "
+                + diagnostic
+            )
+        if client_names and (
+            len(client_names) != calls
+            or any(
+                not (
+                    name.lower().endswith("__evidence_pack")
+                    or name.lower().endswith(".evidence_pack")
+                )
+                for name in client_names
+            )
+        ):
+            raise RuntimeError(
+                "Gremlins-assisted benchmark arm C client stream contains a non-evidence_pack Gremlins call; "
+                + diagnostic
+            )
         if workers and set(workers) != {"evidence-pack"}:
             raise RuntimeError(
                 "Gremlins-assisted benchmark arm C used a Gremlins capability other than evidence_pack; "
