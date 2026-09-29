@@ -582,6 +582,7 @@ def test_single_run_rejects_duplicate_case_arm_iteration_without_force(monkeypat
 
 def test_suite_resumes_existing_case_arm(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(frontier_runner, "_ensure_clean_git_repository", lambda repository: tmp_path)
+    monkeypatch.setattr(frontier_runner, "frontier_preflight", lambda repository, client: {"ok": True})
     monkeypatch.setattr(benchmark, "benchmark_root", lambda: tmp_path)
     monkeypatch.setattr(benchmark, "load_pilot_cases", lambda: [{"id": "case-1"}])
     monkeypatch.setattr(
