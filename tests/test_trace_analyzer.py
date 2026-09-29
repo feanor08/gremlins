@@ -78,3 +78,65 @@ def test_analyze_trace_exposes_iterative_evidence_pack_and_fallback(tmp_path: Pa
     assert row["redundant_post_gremlins_uses"][0]["gremlins_returned_paths_touched"] == [
         "src/gremlins/retrieval.py"
     ]
+
+
+def test_analyze_trace_unwraps_claude_mcp_text_result(tmp_path: Path):
+    analyzer = _load_analyzer()
+    trace = tmp_path / "trace.jsonl"
+    wrapped_result = (
+        '{"request":{"detail":"focused","result_budget_chars":3600},'
+        '"files":[{"path":"src/gremlins/retrieval.py"}],'
+        '"related_paths":[{"path":"tests/test_retrieval.py"}]}'
+    )
+    event = {
+        "type": "user",
+        "message": {
+            "content": [{
+                "type": "tool_result",
+                "tool_use_id": "g1",
+                "content": [{"type": "text", "text": wrapped_result}],
+            }]
+        },
+    }
+    import json
+
+    trace.write_text(
+        "\n".join([
+            '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"g1","name":"mcp__gremlins__evidence_pack","input":{"task":"Inspect retrieval","detail":"focused","paths":["src/gremlins/retrieval.py"]}}]}}',
+            json.dumps(event),
+            '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"r1","name":"Read","input":{"file_path":"src/gremlins/retrieval.py"}}]}}',
+            '{"type":"result","subtype":"success","is_error":false,"num_turns":3,"result":"done","usage":{"input_tokens":1,"output_tokens":1}}',
+        ]) + "\n",
+        encoding="utf-8",
+    )
+
+    row = analyzer.analyze_trace(trace)
+    call = row["gremlins_call_details"][0]
+    assert call["result_chars"] == len(wrapped_result)
+    assert call["result_budget_chars"] == 3600
+    assert call["returned_paths"] == [
+        "src/gremlins/retrieval.py",
+        "tests/test_retrieval.py",
+    ]
+    assert row["redundant_post_gremlins_calls"] == 1
+
+
+def test_summarize_counts_runs_with_post_gremlins_verification():
+    analyzer = _load_analyzer()
+    summary = analyzer.summarize([
+        {
+            "arm": "C",
+            "num_turns": 3,
+            "toolsearch_calls": 0,
+            "permission_denials": [],
+            "direct_evidence_after_first_gremlins": 2,
+            "direct_evidence_calls": 2,
+            "direct_evidence_after_final_gremlins": 2,
+            "redundant_post_gremlins_calls": 1,
+            "evidence_pack_calls": 1,
+            "tool_sequence": ["mcp__gremlins__evidence_pack", "Read", "Grep"],
+        }
+    ])
+
+    assert summary["C"]["post_gremlins_verification_calls"] == 2
+    assert summary["C"]["runs_with_post_gremlins_verification"] == 1
