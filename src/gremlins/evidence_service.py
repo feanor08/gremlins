@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+import ast
 import json
 from pathlib import Path
 import re
@@ -612,6 +613,127 @@ def _test_relationships(
     return relationships[:limit]
 
 
+def _identifier_parts(value: str) -> set[str]:
+    expanded = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", value)
+    return {
+        part.lower()
+        for part in re.findall(r"[A-Za-z][A-Za-z0-9]*", expanded.replace("_", " "))
+        if len(part) >= 2
+    }
+
+
+def _definition_query_tokens(task: str, search_terms: Sequence[str]) -> set[str]:
+    generic = {
+        "class", "def", "definition", "function", "implementation", "line", "list",
+        "method", "name", "path", "sequence", "source", "str",
+    }
+    tokens: set[str] = set()
+    for value in [task, *search_terms]:
+        tokens.update(_identifier_parts(value))
+    return {
+        token
+        for token in tokens
+        if token not in _STOP_WORDS and token not in generic
+    }
+
+
+def _definition_intent(task: str, search_terms: Sequence[str]) -> bool:
+    text = " ".join([task, *search_terms]).lower()
+    return any(
+        word in text
+        for word in ("function", "definition", "method", "class", "implementation", "def ")
+    )
+
+
+def _python_definition_excerpt(
+    repo: Path,
+    path: str,
+    task: str,
+    search_terms: Sequence[str],
+    config: Config,
+) -> Evidence | None:
+    if Path(path).suffix.lower() != ".py":
+        return None
+
+    query_tokens = _definition_query_tokens(task, search_terms)
+    if not query_tokens:
+        return None
+
+    try:
+        file = resolve_repo_file(repo, path)
+        source = file.read_text(encoding="utf-8", errors="replace")
+        tree = ast.parse(source)
+    except (OSError, RuntimeError, SyntaxError, ValueError):
+        return None
+
+    lines = source.splitlines()
+    candidates: list[tuple[int, int, str, ast.AST]] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            continue
+
+        name = str(getattr(node, "name", ""))
+        name_parts = _identifier_parts(name)
+        exact_name = name.lower() in {
+            term.strip().lower()
+            for term in search_terms
+            if term and term.strip()
+        }
+        name_overlap = len(name_parts & query_tokens)
+
+        param_parts: set[str] = set()
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            args = [
+                *node.args.posonlyargs,
+                *node.args.args,
+                *node.args.kwonlyargs,
+            ]
+            if node.args.vararg is not None:
+                args.append(node.args.vararg)
+            if node.args.kwarg is not None:
+                args.append(node.args.kwarg)
+            for arg in args:
+                param_parts.update(_identifier_parts(arg.arg))
+        param_overlap = len(param_parts & query_tokens)
+
+        start = max(1, int(getattr(node, "lineno", 1)))
+        end = max(start, int(getattr(node, "end_lineno", start)))
+        body_text = "\n".join(lines[start - 1:min(end, start + 79)])
+        body_tokens = _identifier_parts(body_text)
+        body_overlap = min(len(body_tokens & query_tokens), 8)
+
+        kind_bonus = 8 if (
+            isinstance(node, ast.ClassDef) and "class" in task.lower()
+        ) or (
+            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and any(word in task.lower() for word in ("function", "method", "implementation", "definition"))
+        ) else 0
+        top_level_bonus = 5 if int(getattr(node, "col_offset", 0)) == 0 else 0
+        score = (
+            (120 if exact_name else 0)
+            + (40 * name_overlap)
+            + (12 * param_overlap)
+            + (2 * body_overlap)
+            + kind_bonus
+            + top_level_bonus
+        )
+        if score <= 0:
+            continue
+        candidates.append((score, -start, name, node))
+
+    if not candidates:
+        return None
+
+    _, _, _, best = max(candidates, key=lambda item: (item[0], item[1], item[2]))
+    start = max(1, int(getattr(best, "lineno", 1)))
+    end = max(start, int(getattr(best, "end_lineno", start)))
+    line_count = min(24, max(8, end - start + 1))
+    try:
+        return read_excerpt(repo, path, config, start_line=start, line_count=line_count)
+    except (OSError, RuntimeError):
+        return None
+
+
 def _file_entry(
     repo: Path,
     path: str,
@@ -619,12 +741,24 @@ def _file_entry(
     search_terms: Sequence[str],
     config: Config,
     focused: bool,
+    task: str,
 ) -> dict:
     hits = [item for item in evidence if item.kind == "search" and item.path == path][:3]
     excerpt = next(
         (item for item in evidence if item.kind == "file" and item.path == path),
         None,
     )
+    definition_excerpt = None
+    if focused and _definition_intent(task, search_terms):
+        definition_excerpt = _python_definition_excerpt(
+            repo,
+            path,
+            task,
+            search_terms,
+            config,
+        )
+    if definition_excerpt is not None:
+        excerpt = definition_excerpt
     if excerpt is None:
         start_line = max(1, int(hits[0].start_line or 1) - 3) if hits else 1
         try:
@@ -640,6 +774,7 @@ def _file_entry(
         "score": score,
         "reasons": (
             (["caller-focused path"] if focused else [])
+            + (["focused symbol definition"] if definition_excerpt is not None else [])
             + ([f"matched {len(set(matched))} query term(s)"] if matched else ["path/name relevance"])
         ),
         "matched_terms": matched[:8],
@@ -802,6 +937,7 @@ def evidence_pack(
             search_terms,
             config,
             focused=path in focused,
+            task=task,
         )
         for path in selected_paths
     ]
