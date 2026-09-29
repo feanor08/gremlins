@@ -236,7 +236,7 @@ For each client, run a separate provenance-locked study with `--include-a`:
 
 - **A — normal client workflow:** Gremlins is forbidden; the client's normal subagent/multi-agent behavior is allowed.
 - **B — tuned frontier-only:** Gremlins is hard-disabled and subagents are disabled. Claude B/C runs expose only native `Read`, `Grep`, and `Glob`; Bash, web, and write/edit tools are blocked to eliminate noninteractive permission-denial noise.
-- **C — Gremlins evidence loop:** subagents are disabled; the client must use deterministic `evidence_pack` first and may make **1–4 tagged evidence-pack calls** as its reasoning develops.
+- **C — Gremlins evidence loop:** subagents are disabled; the client must use deterministic `evidence_pack` first and may make **1–4 tagged evidence-pack calls** as its reasoning develops. The first call is `detail="broad"`; every later call must be `detail="focused"` with at least one concrete path, term, or symbol from prior evidence.
 
 The product gate remains **B vs C**. Arm A is diagnostic: it shows how much the client's normal agent/subagent-heavy workflow costs relative to a disciplined baseline.
 
@@ -259,7 +259,7 @@ frontier reasoning
              evidence_pack #2..#4
 ```
 
-Every C-arm evidence-pack call must reuse the run's unique measurement tag. Other Gremlins capabilities and local-model calls make the treatment invalid. Direct frontier Read/Grep/Glob/Bash/Git retrieval remains available only as fallback so the benchmark can measure when Gremlins is insufficient; the response must report `FRONTIER_REDO_SEARCH=true` if that fallback occurs.
+Every C-arm evidence-pack call must reuse the run's unique measurement tag. Other Gremlins capabilities and local-model calls make the treatment invalid. The first pack uses the broad result budget; later focused packs are capped at 3,600 characters and four detailed files. Direct frontier `Read`/`Grep`/`Glob` remains available only as fallback so the benchmark can measure when Gremlins is insufficient; Bash, web, and write/edit tools are blocked. The response must report `FRONTIER_REDO_SEARCH=true` if direct frontier retrieval occurs.
 
 Claude enforcement uses the CLI tool allow/deny surface. Codex enforcement uses per-run config overrides: arm B sets `mcp_servers.gremlins.enabled=false`; arm C enables the Gremlins MCP server and restricts it to `evidence_pack`. Both B and C disable client subagents.
 
@@ -272,6 +272,19 @@ The runner now records, in addition to tokens/acceptance/elapsed time:
 - frontier redo-search marker.
 
 This lets us test the core observation-derived hypothesis directly: **does the evidence loop remove parent-model retrieval operations, not merely reduce tokens?**
+
+### First two valid Claude pairs — provisional optimization signal
+
+The first valid Mac pairs were `repo-005` and `repo-003`. They are **not** sufficient for the 10-pair product gate, but they are enough to identify an implementation bottleneck:
+
+- both B and C preserved structural acceptance;
+- direct frontier evidence calls were **12 → 0** across the two C treatments;
+- aggregate processed frontier tokens were **567,679 → 383,434 (-32.46%)**;
+- aggregate elapsed time was **50.777 s → 64.179 s (+26.39%)**;
+- aggregate reported frontier cost was **$0.485624 → $0.548032 (+12.85%)**;
+- six Gremlins calls returned 46,434 characters total, about **7,739 characters per call**, nearly saturating the 8,000-character broad result budget.
+
+The architecture signal is positive—Gremlins displaced the observed parent retrieval—but repeated near-full-size evidence packs inflated output/cache-write work and latency. The treatment therefore changed from repeated broad packs to one broad discovery pack followed by compact focused packs. This optimization must be re-measured with fresh studies; old broad-only C results are historical evidence and must not be mixed into the new treatment.
 
 Before spending frontier quota, run the zero-token integration preflight:
 
