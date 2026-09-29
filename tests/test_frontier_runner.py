@@ -488,6 +488,7 @@ def test_c_arm_allows_bounded_repeated_evidence_pack_calls(monkeypatch, tmp_path
         "workers": {"evidence-pack": 2},
         "evidence_pack_details": ["broad", "focused"],
         "evidence_pack_budgets": [8000, 3600],
+        "evidence_pack_result_chars": [7900, 3400],
     })
     monkeypatch.setattr(frontier_runner, "append_record", lambda study, record: tmp_path / "study.jsonl")
     fake_case = {
@@ -539,6 +540,7 @@ def test_c_arm_rejects_nonfocused_followup_telemetry(monkeypatch, tmp_path: Path
         "workers": {"evidence-pack": 2},
         "evidence_pack_details": ["broad", "broad"],
         "evidence_pack_budgets": [8000, 8000],
+        "evidence_pack_result_chars": [7900, 7900],
     })
     fake_case = {
         "id": "case-1",
@@ -561,6 +563,59 @@ def test_c_arm_rejects_nonfocused_followup_telemetry(monkeypatch, tmp_path: Path
         assert "follow-up evidence_pack calls must be focused" in str(exc)
     else:
         raise AssertionError("C arm with repeated broad evidence packs must be rejected")
+
+
+def test_c_arm_rejects_focused_pack_over_actual_size_budget(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr(frontier_runner, "frontier_preflight", lambda repository, client: {"ok": True})
+    monkeypatch.setattr(frontier_runner, "_ensure_frontier_client_ready", lambda client: None)
+    monkeypatch.setattr(frontier_runner, "_ensure_clean_git_repository", lambda repository: tmp_path)
+    monkeypatch.setattr(frontier_runner, "_prepare_workspace", lambda *args, **kwargs: tmp_path)
+    monkeypatch.setattr(frontier_runner, "_ensure_study_provenance", lambda *args, **kwargs: {})
+    monkeypatch.setattr(
+        frontier_runner,
+        "_run_command",
+        lambda *args, **kwargs: SimpleNamespace(
+            stdout="\n".join([
+                '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"mcp__gremlins__evidence_pack","id":"g1","input":{"task":"first"}},{"type":"tool_use","name":"mcp__gremlins__evidence_pack","id":"g2","input":{"task":"second"}}]}}',
+                '{"type":"result","subtype":"success","is_error":false,"result":"src/gremlins/provider.py ProviderBusy busy FRONTIER_REDO_SEARCH=false","usage":{"input_tokens":10,"output_tokens":5}}',
+            ]),
+            stderr="",
+            returncode=0,
+        ),
+    )
+    monkeypatch.setattr(frontier_runner, "gremlins_stats_for_tag", lambda tag: {
+        "tag": tag,
+        "calls": 2,
+        "local_model_calls": 0,
+        "result_chars": 11800,
+        "elapsed_seconds": 0.1,
+        "statuses": {"complete": 2},
+        "workers": {"evidence-pack": 2},
+        "evidence_pack_details": ["broad", "focused"],
+        "evidence_pack_budgets": [8000, 3600],
+        "evidence_pack_result_chars": [7900, 3900],
+    })
+    fake_case = {
+        "id": "case-1",
+        "task": "x",
+        "expected_paths": ["src/gremlins/provider.py"],
+        "expected_claims": [["ProviderBusy"], ["busy"]],
+    }
+    monkeypatch.setattr(frontier_runner, "get_pilot_case", lambda case_id: fake_case)
+    monkeypatch.setattr(benchmark, "get_pilot_case", lambda case_id: fake_case)
+
+    try:
+        frontier_runner.run_frontier_case(
+            study="oversize-focused-c",
+            repository=str(tmp_path),
+            client="claude",
+            case_id="case-1",
+            arm="C",
+        )
+    except RuntimeError as exc:
+        assert "exceeded its declared result budget" in str(exc)
+    else:
+        raise AssertionError("C arm with oversized focused pack must be rejected")
 
 
 def test_c_arm_uses_observed_frontier_evidence_for_redo(monkeypatch, tmp_path: Path):
@@ -591,6 +646,7 @@ def test_c_arm_uses_observed_frontier_evidence_for_redo(monkeypatch, tmp_path: P
         "workers": {"evidence-pack": 1},
         "evidence_pack_details": ["broad"],
         "evidence_pack_budgets": [8000],
+        "evidence_pack_result_chars": [7900],
     })
     monkeypatch.setattr(frontier_runner, "append_record", lambda study, record: tmp_path / "study.jsonl")
     fake_case = {
