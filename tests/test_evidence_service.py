@@ -162,3 +162,49 @@ def test_evidence_pack_auto_focuses_exact_inputs(tmp_path: Path):
     )
     assert result["request"]["detail"] == "focused"
     assert result["request"]["result_budget_chars"] == 3600
+
+
+def test_focused_python_pack_prefers_relevant_function_definition(tmp_path: Path):
+    repo = _repo(tmp_path)
+    retrieval = repo / "src" / "retrieval.py"
+    retrieval.write_text(
+        "\n".join([
+            "def candidate_terms(task):",
+            "    return ['fallback']",
+            "",
+            "def effective_terms(task: str, terms: list[str] | None = None, symbols: list[str] | None = None):",
+            "    supplied = [*(symbols or []), *(terms or [])]",
+            "    return supplied if supplied else candidate_terms(task)",
+            "",
+            "def build_repo_evidence(task: str, terms: list[str] | None = None, symbols: list[str] | None = None):",
+            "    search_terms = effective_terms(task, terms=terms, symbols=symbols)",
+            "    fallback_terms = ['fallback']",
+            "    effective_search_terms = list(search_terms)",
+            "    def excerpt_priority(hit):",
+            "        return any(term in hit for term in fallback_terms)",
+            "    return effective_search_terms",
+        ]) + "\n",
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "add", "src/retrieval.py"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "add focused retrieval fixture"], cwd=repo, check=True)
+
+    result = evidence_pack(
+        str(repo),
+        (
+            "Find the function definition that chooses between orchestrator-supplied "
+            "terms/symbols parameters and fallback keyword extraction to build "
+            "effective_search_terms."
+        ),
+        _config_for(repo),
+        detail="focused",
+        paths=["src/retrieval.py"],
+        terms=["effective_search_terms", "def ", "terms: list", "symbols: list"],
+        include_history=False,
+    )
+
+    entry = next(item for item in result["files"] if item["path"] == "src/retrieval.py")
+    assert "focused symbol definition" in entry["reasons"]
+    assert entry["excerpt"] is not None
+    assert "def effective_terms" in entry["excerpt"]["text"]
+    assert len(json.dumps(result, separators=(",", ":"))) <= 3600
