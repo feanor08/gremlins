@@ -44,7 +44,7 @@
   },
   {
     "id": "repo-003",
-    "task": "Find how exact terms supplied by the orchestrator override fallback keyword extraction.",
+    "task": "Find the implementation that selects orchestrator-supplied exact terms and symbols instead of fallback keyword extraction. Name the function and the source path that implement this selection.",
     "terms": [
       "effective_terms",
       "terms",
