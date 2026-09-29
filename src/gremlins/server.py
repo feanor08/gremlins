@@ -81,9 +81,14 @@ def evidence_pack(
     include_tests: bool = True,
     include_history: bool = True,
     max_files: int = 6,
+    detail: str = "auto",
     measurement_tag: str | None = None,
 ) -> dict:
-    """Deterministic evidence bundle for multi-hop investigation. Call repeatedly during RCA; Gremlins gathers evidence while the caller keeps causal reasoning and judgment."""
+    """Deterministic evidence bundle for multi-hop investigation.
+
+    Use detail=broad for the first discovery pass. Use detail=focused with at
+    least one path/term/symbol for compact follow-up evidence during reasoning.
+    """
     return _evidence_pack(
         repository,
         task,
@@ -95,6 +100,7 @@ def evidence_pack(
         include_tests=include_tests,
         include_history=include_history,
         max_files=max_files,
+        detail=detail,
         measurement_tag=_effective_measurement_tag(measurement_tag),
     )
 
