@@ -12,6 +12,8 @@ import time
 from typing import Any
 import uuid
 
+from .config import project_root
+from .mcpcheck import check_python_module, check_wrapper
 from .benchmark import (
     BenchmarkRecord,
     append_record,
@@ -97,6 +99,97 @@ def _ensure_frontier_client_ready(client: str) -> None:
             "claude authentication is not ready for noninteractive benchmarking: "
             f"{detail}. Run 'claude auth login' and verify 'claude auth status --text'."
         )
+
+
+def _mcp_registration_state(client: str) -> dict:
+    if client not in {"claude", "codex"}:
+        return {"ok": False, "error": f"unsupported client: {client}"}
+    try:
+        proc = subprocess.run(
+            [client, "mcp", "get", "gremlins"],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=15,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+    return {
+        "ok": proc.returncode == 0,
+        "returncode": proc.returncode,
+        "stdout": proc.stdout.strip()[-2000:],
+        "stderr": proc.stderr.strip()[-2000:],
+    }
+
+
+def frontier_preflight(repository: str | Path, client: str) -> dict:
+    """Zero-frontier-token readiness check for a controlled integration run."""
+    source = Path(repository).expanduser().resolve()
+    client_state: dict
+    try:
+        _ensure_frontier_client_ready(client)
+        client_state = {"ok": True}
+    except Exception as exc:
+        client_state = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+
+    source_state: dict
+    try:
+        clean_source = _ensure_clean_git_repository(source)
+        source_state = {"ok": True, "repository": str(clean_source)}
+    except Exception as exc:
+        source_state = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+
+    wrapper = Path("~/.local/bin/gremlins-mcp").expanduser()
+    wrapper_exists = wrapper.is_file()
+    wrapper_text = ""
+    if wrapper_exists:
+        try:
+            wrapper_text = wrapper.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            wrapper_text = ""
+    expected_root = str(project_root())
+    wrapper_root_matches = f"GREMLINS_ROOT='{expected_root}'" in wrapper_text
+    wrapper_smoke = check_wrapper(wrapper) if wrapper_exists else {
+        "ok": False,
+        "error": f"wrapper missing: {wrapper}",
+    }
+    module_smoke = check_python_module()
+    registration = _mcp_registration_state(client)
+    evidence_pack_present = "evidence_pack" in (wrapper_smoke.get("tools") or [])
+
+    checks = {
+        "client_ready": bool(client_state.get("ok")),
+        "source_clean": bool(source_state.get("ok")),
+        "wrapper_exists": wrapper_exists,
+        "wrapper_root_matches_runtime": wrapper_root_matches,
+        "wrapper_mcp_smoke": bool(wrapper_smoke.get("ok")),
+        "module_mcp_smoke": bool(module_smoke.get("ok")),
+        "evidence_pack_present": evidence_pack_present,
+        "client_registration_present": bool(registration.get("ok")),
+    }
+    remediation: list[str] = []
+    if not wrapper_exists or not wrapper_root_matches or not wrapper_smoke.get("ok"):
+        remediation.append("uv run gremlins adapter install mcp")
+    if not registration.get("ok") or not wrapper_root_matches:
+        remediation.append(f"uv run gremlins adapter configure {client}")
+    if not client_state.get("ok"):
+        remediation.append(f"{client} auth status")
+
+    return {
+        "ok": all(checks.values()),
+        "client": client,
+        "runtime_root": expected_root,
+        "wrapper": str(wrapper),
+        "checks": checks,
+        "client_state": client_state,
+        "source_state": source_state,
+        "wrapper_smoke": wrapper_smoke,
+        "module_smoke": module_smoke,
+        "registration": registration,
+        "remediation": list(dict.fromkeys(remediation)),
+        "frontier_model_calls": 0,
+    }
 
 
 def _ensure_clean_git_repository(repository: str | Path) -> Path:
@@ -677,6 +770,7 @@ def run_frontier_case(
     include_a: bool = False,
     save_raw: bool = False,
     iteration: int = 1,
+    force: bool = False,
 ) -> dict:
     if client not in {"claude", "codex"}:
         raise ValueError("client must be claude or codex")
@@ -692,8 +786,33 @@ def run_frontier_case(
 
     case = get_pilot_case(case_id)
     source = _ensure_clean_git_repository(repository)
-    provenance = _ensure_study_provenance(study, source, client, model, include_a)
     iteration = max(1, int(iteration))
+
+    if not force:
+        duplicate = next(
+            (
+                row for row in load_records(study)
+                if str(row.get("case_id")) == str(case_id)
+                and str(row.get("arm")) == str(arm)
+                and int(row.get("iteration") or 1) == iteration
+            ),
+            None,
+        )
+        if duplicate is not None:
+            raise RuntimeError(
+                f"benchmark study {study!r} already contains {case_id}/{arm}/r{iteration}; "
+                "use --force to rerun intentionally or choose a fresh study"
+            )
+
+    if arm == "C":
+        preflight = frontier_preflight(source, client)
+        if not preflight["ok"]:
+            raise RuntimeError(
+                "Gremlins frontier preflight failed before any benchmark model call: "
+                + json.dumps(preflight, ensure_ascii=False, separators=(",", ":"))
+            )
+
+    provenance = _ensure_study_provenance(study, source, client, model, include_a)
     workspace = _prepare_workspace(source, study, case_id, arm, iteration)
     unique_tag = None
     if arm == "C":
@@ -752,6 +871,10 @@ def run_frontier_case(
     run_env = None
     if client == "claude" and arm in {"B", "C"}:
         run_env = _claude_benchmark_env()
+    if arm == "C" and unique_tag:
+        if run_env is None:
+            run_env = os.environ.copy()
+        run_env["GREMLINS_MEASUREMENT_TAG"] = unique_tag
 
     started = time.monotonic()
     proc = _run_command(command, workspace, timeout_seconds, env=run_env)
@@ -1029,6 +1152,7 @@ def run_frontier_suite(
                         include_a=include_a,
                         save_raw=save_raw,
                         iteration=iteration,
+                        force=force,
                     )
                     runs.append({
                         "case_id": case_id,
