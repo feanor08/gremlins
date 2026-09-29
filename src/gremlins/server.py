@@ -12,6 +12,11 @@ from .security import PolicyError, resolve_repository, resolve_repo_file
 from .workers import repo_explore, triage
 
 
+def _effective_measurement_tag(explicit: str | None) -> str | None:
+    """Benchmark harness injection wins over caller-supplied telemetry tags."""
+    return os.environ.get("GREMLINS_MEASUREMENT_TAG") or explicit
+
+
 mcp = MCPServer(
     "Gremlins",
     instructions=(
@@ -90,7 +95,7 @@ def evidence_pack(
         include_tests=include_tests,
         include_history=include_history,
         max_files=max_files,
-        measurement_tag=(os.environ.get("GREMLINS_MEASUREMENT_TAG") or measurement_tag),
+        measurement_tag=_effective_measurement_tag(measurement_tag),
     )
 
 
