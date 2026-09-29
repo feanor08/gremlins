@@ -128,6 +128,7 @@ for case_id in ("repo-005", "repo-009"):
         ),
         "no_permission_denials": len(denials) == 0,
         "no_frontier_redo": row.get("frontier_redid_search") is False,
+        "redo_marker_matches_observed": row.get("frontier_redo_marker_matches_observed") is True,
         "no_direct_frontier_evidence": int(row.get("frontier_direct_evidence_calls") or 0) == 0,
     }
     summary.append({"case_id": case_id, **checks})
