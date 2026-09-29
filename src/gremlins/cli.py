@@ -362,6 +362,7 @@ def run_evidence_pack(args: argparse.Namespace) -> int:
             include_tests=args.include_tests,
             include_history=args.include_history,
             max_files=args.max_files,
+            detail=args.detail,
             measurement_tag=args.measurement_tag,
         ),
         indent=2,
@@ -769,6 +770,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--include-tests", action=argparse.BooleanOptionalAction, default=True)
     p.add_argument("--include-history", action=argparse.BooleanOptionalAction, default=True)
     p.add_argument("--max-files", type=int, default=6)
+    p.add_argument("--detail", choices=["auto", "broad", "focused"], default="auto")
     p.add_argument("--measurement-tag")
     p.set_defaults(func=run_evidence_pack)
 
