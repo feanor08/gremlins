@@ -48,6 +48,9 @@ def run_evidence_service_benchmark(repository: str = ".") -> dict:
     history_required = history_passed = 0
     local_model_calls = 0
     max_result_chars = 0
+    focused_probe_passed = False
+    focused_probe_result_chars = 0
+    focused_probe_budget_chars = 3600
 
     with tempfile.TemporaryDirectory(prefix=".gremlins-evidence-", dir=str(source.parent)) as temp_dir:
         root = Path(temp_dir)
@@ -135,6 +138,30 @@ def run_evidence_service_benchmark(repository: str = ".") -> dict:
                 "elapsed_ms": round(elapsed_ms, 3),
             })
 
+        focused = evidence_pack(
+            str(workspace),
+            "Show the evidence-pack detail handling implementation.",
+            config,
+            detail="focused",
+            paths=["src/gremlins/evidence_service.py"],
+            terms=["detail"],
+            max_files=8,
+        )
+        focused_probe_result_chars = len(
+            json.dumps(focused, ensure_ascii=False, separators=(",", ":"))
+        )
+        focused_request = focused.get("request") or {}
+        focused_probe_budget_chars = int(
+            focused_request.get("result_budget_chars") or 0
+        )
+        focused_probe_passed = (
+            focused_request.get("detail") == "focused"
+            and int(focused_request.get("max_files") or 0) <= 4
+            and focused_probe_budget_chars == 3600
+            and focused_probe_result_chars <= focused_probe_budget_chars
+            and not bool((focused.get("usage") or {}).get("local_model_called"))
+        )
+
     passed_cases = sum(bool(case["ok"]) for case in reports)
     overall = (
         passed_cases == len(reports)
@@ -143,6 +170,7 @@ def run_evidence_service_benchmark(repository: str = ".") -> dict:
         and history_passed == history_required
         and local_model_calls == 0
         and max_result_chars <= base_config.limits.max_result_evidence_chars
+        and focused_probe_passed
     )
     return {
         "benchmark": "evidence-service-v1",
@@ -161,6 +189,9 @@ def run_evidence_service_benchmark(repository: str = ".") -> dict:
             "local_model_calls": local_model_calls,
             "max_result_chars": max_result_chars,
             "result_budget_chars": base_config.limits.max_result_evidence_chars,
+            "focused_probe_passed": focused_probe_passed,
+            "focused_probe_result_chars": focused_probe_result_chars,
+            "focused_probe_budget_chars": focused_probe_budget_chars,
             "elapsed_seconds": round(time.perf_counter() - started, 3),
         },
         "cases": reports,
@@ -170,5 +201,6 @@ def run_evidence_service_benchmark(repository: str = ".") -> dict:
             "required_test_source_relationships_must_exist": True,
             "required_history_must_exist": True,
             "result_must_fit_budget": True,
+            "focused_probe_must_fit_3600_chars": True,
         },
     }
