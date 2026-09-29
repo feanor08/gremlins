@@ -747,6 +747,8 @@ def build_arm_prompt(
         f"Repository: {repository}\n"
         f"Task: {task}\n\n"
         "Finish the task and give a concise evidence-backed answer. "
+        "In the final answer, name the exact repository-relative path(s) supporting each concrete claim or value; "
+        "the benchmark scorer checks those paths explicitly. "
         "Do not modify the repository. Do not read unrelated files."
     )
 
@@ -769,7 +771,8 @@ def build_arm_prompt(
             "In Claude Code this tool is named mcp__gremlins__evidence_pack; in other MCP clients use the equivalent evidence_pack tool exposed by the Gremlins server. "
             "You MAY call evidence_pack repeatedly as your reasoning develops, but make no more than four Gremlins calls in this arm. "
             "Use evidence_pack as the only Gremlins tool for this arm; do not call repo_explorer, repo_search, code_read, git_history, status, or failure_triage. "
-            f"On every evidence_pack call pass repository='{repository}' and measurement_tag='{tag}'. "
+            f"On every evidence_pack call pass repository='{repository}'. "
+            f"The benchmark harness injects measurement_tag='{tag}' into the Gremlins MCP process, so do not invent or change the tag. "
             "Start with a broad evidence question derived from the task. Then reason over the returned files, related_paths, relationships, and history. "
             "If a hypothesis or missing fact needs another lookup, call evidence_pack again with a narrower task and, when useful, focused paths, exact terms, or symbols from the previous pack. "
             "Prefer another focused evidence_pack over direct Read/Grep/Glob/Bash/Git retrieval. "
