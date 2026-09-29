@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 from mcp.server import MCPServer
 
 from .config import load_config
@@ -88,7 +90,7 @@ def evidence_pack(
         include_tests=include_tests,
         include_history=include_history,
         max_files=max_files,
-        measurement_tag=measurement_tag,
+        measurement_tag=(os.environ.get("GREMLINS_MEASUREMENT_TAG") or measurement_tag),
     )
 
 
