@@ -985,6 +985,10 @@ def run_frontier_case(
             int(value)
             for value in ((local or {}).get("evidence_pack_budgets") or [])
         ]
+        pack_result_chars = [
+            int(value)
+            for value in ((local or {}).get("evidence_pack_result_chars") or [])
+        ]
         if len(details) != calls:
             raise RuntimeError(
                 "Gremlins-assisted benchmark arm C evidence detail telemetry is incomplete; "
@@ -1008,6 +1012,21 @@ def run_frontier_case(
         if len(budgets) > 1 and any(budget > 3600 for budget in budgets[1:]):
             raise RuntimeError(
                 "Gremlins-assisted benchmark arm C focused evidence packs exceeded the compact follow-up budget; "
+                + diagnostic
+            )
+        if len(pack_result_chars) != calls:
+            raise RuntimeError(
+                "Gremlins-assisted benchmark arm C evidence result-size telemetry is incomplete; "
+                + diagnostic
+            )
+        if any(size > budget for size, budget in zip(pack_result_chars, budgets)):
+            raise RuntimeError(
+                "Gremlins-assisted benchmark arm C evidence pack exceeded its declared result budget; "
+                + diagnostic
+            )
+        if len(pack_result_chars) > 1 and any(size > 3600 for size in pack_result_chars[1:]):
+            raise RuntimeError(
+                "Gremlins-assisted benchmark arm C focused evidence pack exceeded 3600 result characters; "
                 + diagnostic
             )
         client_calls = parsed.metadata.get("frontier_gremlins_tool_calls")
@@ -1079,6 +1098,10 @@ def run_frontier_case(
         gremlins_evidence_pack_budgets=tuple(
             int(value)
             for value in ((local or {}).get("evidence_pack_budgets") or [])
+        ),
+        gremlins_evidence_pack_result_chars=tuple(
+            int(value)
+            for value in ((local or {}).get("evidence_pack_result_chars") or [])
         ),
         notes=(
             f"automated hidden acceptance; missing_expected_paths={missing_paths}; "
