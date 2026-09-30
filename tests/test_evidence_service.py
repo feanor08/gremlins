@@ -4,7 +4,7 @@ import json
 import subprocess
 
 from gremlins.config import load_config
-from gremlins.evidence_service import _focused_hit_context_excerpt, evidence_pack
+from gremlins.evidence_service import _focused_hit_context_excerpt, _tracked_file_neighbors, evidence_pack
 from gremlins.retrieval import Evidence
 
 
@@ -67,6 +67,31 @@ def test_evidence_pack_fuzzy_discovery_relationships_and_history(tmp_path: Path)
     )
     assert any(item["path"] == "src/provider.py" for item in result["history"]["by_path"])
     assert len(json.dumps(result, separators=(",", ":"))) <= _config_for(repo).limits.max_result_evidence_chars
+
+
+def test_tracked_file_neighbors_follow_unique_literal_config_reference(tmp_path: Path):
+    repo = _repo(tmp_path)
+    nested = repo / "src" / "gremlins"
+    nested.mkdir()
+    source = nested / "config.py"
+    source.write_text(
+        'def load_config(root):\n    return root / "gremlins.toml"\n',
+        encoding="utf-8",
+    )
+    (repo / "gremlins.toml").write_text(
+        "[limits]\nmax_result_evidence_chars = 8000\n",
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "add", "."], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "add tracked config reference"], cwd=repo, check=True)
+
+    neighbors = _tracked_file_neighbors(
+        repo,
+        ["src/gremlins/config.py"],
+        _config_for(repo),
+    )
+
+    assert "gremlins.toml" in neighbors
 
 
 def test_evidence_pack_focus_path_is_preserved(tmp_path: Path):
