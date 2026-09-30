@@ -223,7 +223,8 @@ def test_commands_are_noninteractive_and_read_only(tmp_path: Path):
     assert 'mcp_servers.gremlins.env_vars=["GREMLINS_MEASUREMENT_TAG"]' in codex_c
     skill_override = next(value for value in codex_c if value.startswith("skills.config="))
     assert "gremlins-delegation" in skill_override
-    assert '"enabled": false' in skill_override
+    assert skill_override.startswith('skills.config=[{path="')
+    assert skill_override.endswith(',enabled=false}]')
 
 
 def test_structural_acceptance_and_redo_marker():

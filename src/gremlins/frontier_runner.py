@@ -40,7 +40,7 @@ _CODEX_C_MCP_OVERRIDES = (
 
 def _codex_gremlins_skill_override() -> str:
     skill = Path("~/.codex/skills/gremlins-delegation").expanduser()
-    return "skills.config=" + json.dumps([{"path": str(skill), "enabled": False}])
+    return f"skills.config=[{{path={json.dumps(str(skill))},enabled=false}}]"
 
 
 @dataclass(frozen=True)
