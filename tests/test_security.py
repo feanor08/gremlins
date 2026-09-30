@@ -2,6 +2,7 @@ from pathlib import Path
 import subprocess
 import pytest
 
+import gremlins.config as config_module
 from gremlins.config import Config, Limits, ProviderConfig, SecurityConfig, load_config
 from gremlins.security import PolicyError, resolve_repository, resolve_repo_file
 
@@ -97,3 +98,58 @@ allow_network_to = ["127.0.0.1"]
 
     assert root.resolve() in config.security.allowed_roots
     assert resolve_repository(root, config) == root.resolve()
+
+
+def test_tilde_allowed_root_uses_account_home_not_process_home(tmp_path, monkeypatch):
+    account_home = tmp_path / "account-home"
+    isolated_home = tmp_path / "isolated-home"
+    root = tmp_path / "gremlins-root"
+    workspace = account_home / ".local" / "state" / "gremlins" / "benchmarks" / "workspace"
+
+    account_home.mkdir()
+    isolated_home.mkdir()
+    root.mkdir()
+    workspace.mkdir(parents=True)
+    (root / "profiles").mkdir()
+
+    (root / "gremlins.toml").write_text(
+        """[provider]
+kind = "ollama"
+url = "http://127.0.0.1:11434"
+model = "x"
+
+[limits]
+max_task_chars = 4000
+max_evidence_chars = 48000
+max_result_evidence_chars = 8000
+max_file_chars = 16000
+max_search_matches = 80
+max_history_entries = 24
+max_model_output_tokens = 1200
+model_context_tokens = 16384
+model_timeout_seconds = 90
+command_timeout_seconds = 12
+
+[security]
+allowed_roots = ["~"]
+denied_paths = []
+require_git_repository = true
+allow_network_to = ["127.0.0.1"]
+""",
+        encoding="utf-8",
+    )
+    (root / "profiles" / "mac-local.toml").write_text(
+        "allowed_roots_extra = []\n",
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "init", "-q"], cwd=workspace, check=True)
+
+    monkeypatch.setenv("HOME", str(isolated_home))
+    monkeypatch.setenv("GREMLINS_ROOT", str(root))
+    monkeypatch.setattr(config_module, "_account_home", lambda: account_home.resolve())
+
+    config = load_config()
+
+    assert account_home.resolve() in config.security.allowed_roots
+    assert isolated_home.resolve() not in config.security.allowed_roots
+    assert resolve_repository(workspace, config) == workspace.resolve()
