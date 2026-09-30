@@ -301,6 +301,54 @@ def test_focused_compaction_never_evicts_caller_path(tmp_path: Path):
     assert len(json.dumps(result, separators=(",", ":"))) <= 1400
 
 
+def test_focused_compaction_preserves_exact_hit_context_over_no_hit_focus_excerpts(
+    tmp_path: Path,
+):
+    repo = _repo(tmp_path)
+    for name in ("alpha", "beta", "gamma"):
+        (repo / "src" / f"{name}.py").write_text(
+            "\n".join([
+                f"def {name}_operation():",
+                *[f"    value_{index} = {index}" for index in range(40)],
+                "    return True",
+            ]) + "\n",
+            encoding="utf-8",
+        )
+    (repo / "tests" / "test_budget_terms.py").write_text(
+        "\n".join([
+            "def test_budget_terms():",
+            '    task = "Find the frontier-facing evidence size budget."',
+            '    terms = ["max_result_evidence_chars"]',
+            "    assert terms",
+        ]) + "\n",
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "add", "."], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "add focused compaction fixture"], cwd=repo, check=True)
+
+    result = evidence_pack(
+        str(repo),
+        (
+            "Exact verification: show the definition and value associated with "
+            "identifier size_budget and all literal frontier-facing occurrences."
+        ),
+        _config_for(repo),
+        detail="focused",
+        paths=["src/alpha.py", "src/beta.py", "src/gamma.py"],
+        symbols=["size_budget"],
+        terms=["size_budget", "frontier-facing"],
+        include_history=False,
+        include_tests=False,
+        max_files=6,
+    )
+
+    by_path = {item["path"]: item for item in result["files"]}
+    assert all(path in by_path for path in ("src/alpha.py", "src/beta.py", "src/gamma.py"))
+    exact_hit = by_path["tests/test_budget_terms.py"]
+    assert 'terms = ["max_result_evidence_chars"]' in exact_hit["excerpt"]["text"]
+    assert len(json.dumps(result, separators=(",", ":"))) <= 3600
+
+
 def test_focused_python_definition_prefers_exact_parameter_hints_over_fallback_helper(tmp_path: Path):
     repo = _repo(tmp_path)
     retrieval = repo / "src" / "retrieval.py"
