@@ -494,8 +494,10 @@ def test_local_pilot_hides_answer_key_from_worker(monkeypatch, tmp_path: Path):
     import gremlins.workers as workers
 
     def fake_repo_explore(repository, *args, **kwargs):
-        workspace = Path(repository)
+        workspace = Path(repository).resolve()
         assert not (workspace / "evals").exists()
+        config = args[1]
+        assert workspace in config.security.allowed_roots
         return {
             "status": "complete",
             "files": [{"path": "src/answer.py", "hits": [{"line": 1, "text": "needle = 1"}]}],
@@ -509,3 +511,51 @@ def test_local_pilot_hides_answer_key_from_worker(monkeypatch, tmp_path: Path):
     assert report["passed"] == 1
     assert report["failed"] == 0
 
+
+
+def test_local_pilot_authorizes_only_its_synthetic_workspace(monkeypatch, tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=repo, check=True)
+    (repo / "src").mkdir()
+    (repo / "src" / "answer.py").write_text("needle = 1\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "fixture"], cwd=repo, check=True)
+
+    monkeypatch.setattr(
+        benchmark,
+        "load_pilot_cases",
+        lambda: [{
+            "id": "case",
+            "task": "find needle",
+            "terms": ["needle"],
+            "expected_paths": ["src/answer.py"],
+        }],
+    )
+
+    import gremlins.workers as workers
+
+    observed = {}
+
+    def fake_repo_explore(repository, task, config, **kwargs):
+        workspace = Path(repository).resolve()
+        observed["workspace"] = workspace
+        observed["allowed_roots"] = config.security.allowed_roots
+        return {
+            "status": "complete",
+            "files": [{"path": "src/answer.py"}],
+            "hits_returned": 1,
+            "hits_ranked": 1,
+            "usage": {"local_model_called": False},
+        }
+
+    monkeypatch.setattr(workers, "repo_explore", fake_repo_explore)
+    report = benchmark.run_local_pilot(str(repo))
+
+    assert report["passed"] == 1
+    workspace = observed["workspace"]
+    allowed = observed["allowed_roots"]
+    assert workspace in allowed
+    assert workspace.parent not in allowed

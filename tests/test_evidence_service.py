@@ -250,3 +250,149 @@ def test_focused_compaction_never_evicts_caller_path(tmp_path: Path):
     assert "caller-focused path" in result["files"][0]["reasons"]
     assert any(item["path"] == "tests/test_provider.py" for item in result["files"])
     assert len(json.dumps(result, separators=(",", ":"))) <= 1400
+
+
+def test_focused_python_definition_prefers_exact_parameter_hints_over_fallback_helper(tmp_path: Path):
+    repo = _repo(tmp_path)
+    retrieval = repo / "src" / "retrieval.py"
+    retrieval.write_text(
+        "\n".join([
+            "def candidate_terms(task):",
+            "    return ['fallback']",
+            "",
+            "def effective_terms(task: str, terms: list[str] | None = None, symbols: list[str] | None = None):",
+            "    supplied = []",
+            "    for value in [*(symbols or []), *(terms or [])]:",
+            "        if value:",
+            "            supplied.append(value)",
+            "    return supplied if supplied else candidate_terms(task)",
+            "",
+            "def _fallback_terms_for_missed_phrases(task: str, search_terms, search_meta, limit: int = 2):",
+            "    \"\"\"Recover fallback keyword terms when exact search terms miss.",
+            "",
+            "    Supplied terms remain authoritative and are searched first.",
+            "    \"\"\"",
+            "    fallback_terms = []",
+            "    for term in search_terms:",
+            "        if search_meta.get(term) == 0:",
+            "            fallback_terms.append(term)",
+            "    return fallback_terms[:limit]",
+            "",
+            "def build_repo_evidence(task: str, terms=None, symbols=None):",
+            "    search_terms = effective_terms(task, terms=terms, symbols=symbols)",
+            "    fallback_terms = _fallback_terms_for_missed_phrases(task, search_terms, {})",
+            "    effective_search_terms = [*search_terms, *fallback_terms]",
+            "    return effective_search_terms",
+        ]) + "\n",
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "add", "src/retrieval.py"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "add competing fallback helper"], cwd=repo, check=True)
+
+    result = evidence_pack(
+        str(repo),
+        (
+            "Find the function definition that chooses between orchestrator-supplied "
+            "terms/symbols parameters and fallback keyword extraction to build "
+            "effective_search_terms."
+        ),
+        _config_for(repo),
+        detail="focused",
+        paths=["src/retrieval.py"],
+        terms=["effective_search_terms", "def ", "terms: list", "symbols: list"],
+        include_history=False,
+    )
+
+    entry = next(item for item in result["files"] if item["path"] == "src/retrieval.py")
+    excerpt = (entry.get("excerpt") or {}).get("text") or ""
+    assert "focused symbol definition" in entry["reasons"]
+    assert "def effective_terms" in excerpt
+    assert "def _fallback_terms_for_missed_phrases" not in excerpt
+    assert len(json.dumps(result, separators=(",", ":"))) <= 3600
+
+
+def test_focused_definition_body_overlap_ignores_docstrings_and_string_literals(tmp_path: Path):
+    repo = _repo(tmp_path)
+    retrieval = repo / "src" / "retrieval.py"
+    retrieval.write_text(
+        "\n".join([
+            "def candidate_terms(task):",
+            "    return ['fallback']",
+            "",
+            "def effective_terms(task: str, terms=None, symbols=None):",
+            "    supplied = [*(symbols or []), *(terms or [])]",
+            "    return supplied if supplied else candidate_terms(task)",
+            "",
+            "def _fallback_terms_for_missed_phrases(task: str, search_terms, search_meta, limit=2):",
+            "    \"\"\"Supplied terms remain authoritative; fallback search goes to effective terms.\"\"\"",
+            "    noise = 'to supplied fallback search effective terms symbols'",
+            "    fallback_terms = []",
+            "    for term in search_terms:",
+            "        if search_meta.get(term) == 0:",
+            "            fallback_terms.append(term)",
+            "    return fallback_terms[:limit]",
+            "",
+            "def build_repo_evidence(task: str, terms=None, symbols=None):",
+            "    search_terms = effective_terms(task, terms=terms, symbols=symbols)",
+            "    fallback_terms = _fallback_terms_for_missed_phrases(task, search_terms, {})",
+            "    effective_search_terms = [*search_terms, *fallback_terms]",
+            "    return effective_search_terms",
+        ]) + "\n",
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "add", "src/retrieval.py"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "add prose-heavy fallback decoy"], cwd=repo, check=True)
+
+    result = evidence_pack(
+        str(repo),
+        (
+            "Find the function definition that chooses between orchestrator-supplied "
+            "terms/symbols parameters and fallback keyword extraction to build "
+            "effective_search_terms."
+        ),
+        _config_for(repo),
+        detail="focused",
+        paths=["src/retrieval.py"],
+        # Deliberately omit signature-like parameter hints so this regression
+        # isolates AST code-body scoring from prose/string-literal noise.
+        terms=["effective_search_terms", "def "],
+        include_history=False,
+    )
+
+    entry = next(item for item in result["files"] if item["path"] == "src/retrieval.py")
+    excerpt = (entry.get("excerpt") or {}).get("text") or ""
+    assert "def effective_terms" in excerpt
+    assert "def _fallback_terms_for_missed_phrases" not in excerpt
+
+
+def test_focused_definition_exact_param_hints_beat_loose_param_tokens(tmp_path: Path):
+    repo = _repo(tmp_path)
+    retrieval = repo / "src" / "retrieval.py"
+    retrieval.write_text(
+        "\n".join([
+            "def effective_terms(task: str, terms=None, symbols=None):",
+            "    supplied = [*(symbols or []), *(terms or [])]",
+            "    return supplied",
+            "",
+            "def fallback_terms(task: str, search_terms=None, search_symbols=None):",
+            "    return [*(search_symbols or []), *(search_terms or [])]",
+        ]) + "\n",
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "add", "src/retrieval.py"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "add exact versus loose params"], cwd=repo, check=True)
+
+    result = evidence_pack(
+        str(repo),
+        "Find the function implementation using the supplied terms/symbols parameters.",
+        _config_for(repo),
+        detail="focused",
+        paths=["src/retrieval.py"],
+        terms=["terms: list", "symbols: list"],
+        include_history=False,
+    )
+
+    entry = next(item for item in result["files"] if item["path"] == "src/retrieval.py")
+    excerpt = (entry.get("excerpt") or {}).get("text") or ""
+    assert "def effective_terms" in excerpt
+    assert "def fallback_terms" not in excerpt

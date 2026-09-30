@@ -645,6 +645,67 @@ def _definition_intent(task: str, search_terms: Sequence[str]) -> bool:
     )
 
 
+def _definition_parameter_hints(search_terms: Sequence[str]) -> set[str]:
+    hints: set[str] = set()
+
+    # Preserve caller-explicit signature structure before generic tokenization.
+    # "terms: list" is stronger evidence for a parameter literally named
+    # "terms" than the loose "terms" token inside "search_terms".
+    for value in search_terms:
+        match = re.match(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*:", value)
+        if match:
+            hints.add(match.group(1).lower())
+    return hints
+
+
+def _definition_body_tokens(node: ast.AST) -> set[str]:
+    tokens: set[str] = set()
+
+    class BodyIdentifierVisitor(ast.NodeVisitor):
+        def visit_Name(self, child: ast.Name) -> None:
+            tokens.update(_identifier_parts(child.id))
+
+        def visit_Attribute(self, child: ast.Attribute) -> None:
+            tokens.update(_identifier_parts(child.attr))
+            self.visit(child.value)
+
+        def visit_keyword(self, child: ast.keyword) -> None:
+            if child.arg:
+                tokens.update(_identifier_parts(child.arg))
+            self.visit(child.value)
+
+        # Nested definitions are separate ranking candidates. Their signatures,
+        # docstrings, strings and bodies must not inflate the enclosing node.
+        def visit_FunctionDef(self, child: ast.FunctionDef) -> None:
+            return
+
+        def visit_AsyncFunctionDef(self, child: ast.AsyncFunctionDef) -> None:
+            return
+
+        def visit_ClassDef(self, child: ast.ClassDef) -> None:
+            return
+
+        def visit_Lambda(self, child: ast.Lambda) -> None:
+            return
+
+        # String literals/docstrings are prose, not structural code evidence.
+        def visit_Constant(self, child: ast.Constant) -> None:
+            return
+
+    visitor = BodyIdentifierVisitor()
+    for statement in getattr(node, "body", []):
+        # Skip the candidate's leading docstring explicitly. Other string
+        # literals are ignored by visit_Constant above.
+        if (
+            isinstance(statement, ast.Expr)
+            and isinstance(statement.value, ast.Constant)
+            and isinstance(statement.value.value, str)
+        ):
+            continue
+        visitor.visit(statement)
+    return tokens
+
+
 def _python_definition_excerpt(
     repo: Path,
     path: str,
@@ -656,7 +717,8 @@ def _python_definition_excerpt(
         return None
 
     query_tokens = _definition_query_tokens(task, search_terms)
-    if not query_tokens:
+    parameter_hints = _definition_parameter_hints(search_terms)
+    if not query_tokens and not parameter_hints:
         return None
 
     try:
@@ -682,6 +744,7 @@ def _python_definition_excerpt(
         name_overlap = len(name_parts & query_tokens)
 
         param_parts: set[str] = set()
+        param_names: set[str] = set()
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             args = [
                 *node.args.posonlyargs,
@@ -693,13 +756,15 @@ def _python_definition_excerpt(
             if node.args.kwarg is not None:
                 args.append(node.args.kwarg)
             for arg in args:
+                param_names.add(arg.arg.lower())
                 param_parts.update(_identifier_parts(arg.arg))
         param_overlap = len(param_parts & query_tokens)
+        exact_param_matches = len(param_names & parameter_hints)
+        all_parameter_hints_match = bool(parameter_hints) and parameter_hints <= param_names
 
         start = max(1, int(getattr(node, "lineno", 1)))
         end = max(start, int(getattr(node, "end_lineno", start)))
-        body_text = "\n".join(lines[start - 1:min(end, start + 79)])
-        body_tokens = _identifier_parts(body_text)
+        body_tokens = _definition_body_tokens(node)
         body_overlap = min(len(body_tokens & query_tokens), 8)
 
         kind_bonus = 8 if (
@@ -710,9 +775,14 @@ def _python_definition_excerpt(
         ) else 0
         top_level_bonus = 5 if int(getattr(node, "col_offset", 0)) == 0 else 0
         score = (
-            (120 if exact_name else 0)
+            # Structural signal hierarchy:
+            # exact symbol > exact hinted parameter > loose name token >
+            # loose parameter token > executable-body token.
+            (160 if exact_name else 0)
             + (40 * name_overlap)
             + (12 * param_overlap)
+            + (55 * exact_param_matches)
+            + (25 if all_parameter_hints_match else 0)
             + (2 * body_overlap)
             + kind_bonus
             + top_level_bonus
@@ -727,7 +797,10 @@ def _python_definition_excerpt(
     _, _, _, best = max(candidates, key=lambda item: (item[0], item[1], item[2]))
     start = max(1, int(getattr(best, "lineno", 1)))
     end = max(start, int(getattr(best, "end_lineno", start)))
-    line_count = min(24, max(8, end - start + 1))
+    # A structural definition excerpt must not spill into the next sibling
+    # definition. For short nodes, return the node's exact source span rather
+    # than padding to an arbitrary minimum context size.
+    line_count = min(24, end - start + 1)
     try:
         return read_excerpt(repo, path, config, start_line=start, line_count=line_count)
     except (OSError, RuntimeError):

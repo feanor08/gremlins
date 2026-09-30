@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timezone
 import json
 from pathlib import Path
@@ -514,11 +514,26 @@ def run_local_pilot(repository: str = ".", case_id: str | None = None) -> dict:
         if sparse.returncode != 0:
             raise RuntimeError(f"failed to isolate local pilot answer data: {sparse.stderr.strip()}")
 
+        # The pilot workspace is created by this harness and intentionally lives
+        # outside normal user repository roots. Authorize only this exact
+        # synthetic workspace in the in-memory config used for the pilot.
+        workspace_root = workspace.resolve()
+        pilot_config = replace(
+            config,
+            security=replace(
+                config.security,
+                allowed_roots=tuple(dict.fromkeys([
+                    *config.security.allowed_roots,
+                    workspace_root,
+                ])),
+            ),
+        )
+
         for case in cases:
             result = repo_explore(
                 str(workspace),
                 str(case["task"]),
-                config,
+                pilot_config,
                 terms=[str(value) for value in case.get("terms", [])],
                 symbols=[str(value) for value in case.get("symbols", [])],
                 mode="deterministic",
