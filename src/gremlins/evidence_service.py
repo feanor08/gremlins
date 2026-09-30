@@ -815,20 +815,40 @@ def _focused_hit_context_excerpt(
     search_terms: Sequence[str],
     config: Config,
 ) -> Evidence | None:
-    """Return compact multi-region context when exact code hits matter more than a definition."""
+    """Return compact exact-hit context when literal code evidence should outrank a definition."""
     intent = task.lower()
-    if not any(word in intent for word in ("around", "context", "handler", "branch", "hit-centered")):
+    exact_verification = any(
+        phrase in intent
+        for phrase in (
+            "exact verification",
+            "exact final verification",
+            "verify exact",
+            "exact implementation",
+        )
+    )
+    contextual_request = any(
+        word in intent for word in ("around", "context", "handler", "branch", "hit-centered")
+    )
+    if not (exact_verification or contextual_request):
         return None
 
-    code_terms = [
-        term.strip().lower()
-        for term in search_terms
-        if term.strip()
-        and (
+    code_terms: list[str] = []
+    for raw_term in search_terms:
+        term = raw_term.strip().lower()
+        if not term:
+            continue
+        code_shaped = (
             any(char in term for char in ("=", ":", "(", ")", '"', "'"))
-            or term.strip().lower().startswith(("except ", "return ", "raise "))
+            or term.startswith(("except ", "return ", "raise "))
         )
-    ]
+        # Exact-verification callers often do not know the enclosing symbol yet
+        # and therefore supply compact source fragments such as "terms or".
+        # Treat those short literal phrases as anchors without broadening normal
+        # focused searches into arbitrary prose matching.
+        literal_phrase = exact_verification and len(term.split()) <= 4
+        if code_shaped or literal_phrase:
+            code_terms.append(term)
+
     if not code_terms:
         return None
 
@@ -857,11 +877,12 @@ def _focused_hit_context_excerpt(
     clusters = clusters[:2]
 
     # A repository-wide literal search may cap later matches before every
-    # same-file status line is returned. Complete each exact handler cluster
-    # from the already-open source so nearby requested literals survive.
+    # same-file literal is returned. Complete each exact cluster from the
+    # already-open source so caller-supplied fragments survive.
     for cluster in clusters:
+        scan_start = max(1, min(cluster) - 16)
         scan_end = min(len(lines), max(cluster) + 16)
-        for line in range(min(cluster), scan_end + 1):
+        for line in range(scan_start, scan_end + 1):
             if any(term in lines[line - 1].lower() for term in code_terms):
                 cluster.append(line)
         cluster[:] = sorted(set(cluster))
@@ -879,33 +900,60 @@ def _focused_hit_context_excerpt(
 
     sections: list[str] = []
     selected_lines: list[int] = []
+    seen_function_spans: set[tuple[int, int]] = set()
     for cluster in clusters:
-        start = max(1, min(cluster) - 1)
-        end = min(len(lines), max(cluster) + 2)
         containing = [
             node for node in functions
             if int(getattr(node, "lineno", 0)) <= min(cluster)
             <= int(getattr(node, "end_lineno", 0))
         ]
-        function_line = None
-        if containing:
-            enclosing = min(
+        enclosing = (
+            min(
                 containing,
-                key=lambda node: int(getattr(node, "end_lineno", 0)) - int(getattr(node, "lineno", 0)),
+                key=lambda node: int(getattr(node, "end_lineno", 0))
+                - int(getattr(node, "lineno", 0)),
             )
-            function_line = int(getattr(enclosing, "lineno", 0))
+            if containing
+            else None
+        )
 
-        priority_lines: list[int] = []
-        if function_line and function_line < start:
-            priority_lines.append(function_line)
-        priority_lines.extend(cluster)
-        context_lines = [
-            line for line in range(start, end + 1)
-            if line not in priority_lines
-        ]
-        # Put the enclosing definition and exact requested hits first so a
-        # compact wire-budget trim cannot discard a later handler/status pair.
-        section_lines = [*priority_lines, *context_lines]
+        if exact_verification and enclosing is not None:
+            function_start = int(getattr(enclosing, "lineno", 0))
+            function_end = int(getattr(enclosing, "end_lineno", function_start))
+            function_span = (function_start, function_end)
+            if function_span in seen_function_spans:
+                continue
+            seen_function_spans.add(function_span)
+
+            if function_end - function_start + 1 <= 24:
+                section_lines = list(range(function_start, function_end + 1))
+            else:
+                start = max(function_start, min(cluster) - 6)
+                end = min(function_end, max(cluster) + 8)
+                section_lines = [function_start]
+                section_lines.extend(
+                    line
+                    for line in range(start, end + 1)
+                    if line != function_start
+                )
+        else:
+            start = max(1, min(cluster) - 1)
+            end = min(len(lines), max(cluster) + 2)
+            function_line = (
+                int(getattr(enclosing, "lineno", 0))
+                if enclosing is not None
+                else None
+            )
+            priority_lines: list[int] = []
+            if function_line and function_line < start:
+                priority_lines.append(function_line)
+            priority_lines.extend(cluster)
+            context_lines = [
+                line for line in range(start, end + 1)
+                if line not in priority_lines
+            ]
+            section_lines = [*priority_lines, *context_lines]
+
         selected_lines.extend(section_lines)
         sections.append("\n".join(f"L{line}: {lines[line - 1]}" for line in section_lines))
 
