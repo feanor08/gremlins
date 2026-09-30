@@ -1041,6 +1041,7 @@ def _ensure_study_provenance(
         "claude_tool_search": "disabled-preload" if client == "claude" else None,
         "claude_ai_mcp_servers": False if client == "claude" else None,
         "codex_treatment_home": "isolated-v1" if client == "codex" else None,
+        "codex_state_dir_mode": "explicit-shared-v1" if client == "codex" else None,
     }
     assert_study_compatible(study, payload)
     write_study_metadata(study, payload)
@@ -1467,6 +1468,8 @@ def run_frontier_suite(
         "ordering": "counterbalanced B/C by case index + iteration parity",
         "claude_tool_search": "disabled-preload" if client == "claude" else None,
         "claude_ai_mcp_servers": False if client == "claude" else None,
+        "codex_treatment_home": "isolated-v1" if client == "codex" else None,
+        "codex_state_dir_mode": "explicit-shared-v1" if client == "codex" else None,
     }
     assert_study_compatible(study, study_metadata)
     metadata_path = write_study_metadata(study, study_metadata)
