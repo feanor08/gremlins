@@ -179,6 +179,15 @@ def _codex_c_treatment_config_state() -> dict:
     args.extend(["mcp", "get", "gremlins"])
     env = _codex_benchmark_env()
     try:
+        auth_proc = subprocess.run(
+            ["codex", "login", "status"],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=15,
+            check=False,
+            env=env,
+        )
         proc = subprocess.run(
             args,
             text=True,
@@ -191,15 +200,19 @@ def _codex_c_treatment_config_state() -> dict:
     except (OSError, subprocess.TimeoutExpired) as exc:
         return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
     stdout = proc.stdout.strip()
+    auth_detail = (auth_proc.stdout.strip() or auth_proc.stderr.strip())[-2000:]
     return {
         "ok": (
-            proc.returncode == 0
+            auth_proc.returncode == 0
+            and proc.returncode == 0
             and "enabled: true" in stdout
             and "enabled_tools: evidence_pack" in stdout
         ),
         "returncode": proc.returncode,
         "stdout": stdout[-2000:],
         "stderr": proc.stderr.strip()[-2000:],
+        "auth_returncode": auth_proc.returncode,
+        "auth_status": auth_detail,
         "overrides": list(overrides),
         "isolated_home": env.get("HOME"),
         "isolated_codex_home": env.get("CODEX_HOME"),
