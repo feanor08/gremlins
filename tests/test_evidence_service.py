@@ -259,6 +259,59 @@ def test_focused_handler_request_returns_multiple_exact_hit_regions(tmp_path: Pa
     assert len(json.dumps(result, separators=(",", ":"))) <= 3600
 
 
+def test_exact_verification_prefers_enclosing_function_around_literal_hit(tmp_path: Path):
+    repo = _repo(tmp_path)
+    service = repo / "src" / "evidence_service.py"
+    service.write_text(
+        "\n".join([
+            "def effective_terms(task, terms=None, symbols=None):",
+            "    return [*(terms or []), *(symbols or [])]",
+            "",
+            "def _discovery_terms(task, terms=None, symbols=None):",
+            "    explicit = bool(terms or symbols)",
+            "    base = effective_terms(task, terms=terms, symbols=symbols)",
+            "    if explicit:",
+            "        return base, []",
+            "    fallback = [word for word in task.split() if len(word) > 3]",
+            "    return base, fallback",
+            "",
+            *[f"padding_{index} = {index}" for index in range(30)],
+            "",
+            "def evidence_pack(repository, task, terms=None, symbols=None):",
+            "    search_terms, fallback_terms = _discovery_terms(task, terms, symbols)",
+            "    return search_terms + fallback_terms",
+        ]) + "\n",
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "add", "src/evidence_service.py"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "add discovery-term fixture"], cwd=repo, check=True)
+
+    result = evidence_pack(
+        str(repo),
+        (
+            "Exact final verification: show the evidence_pack selection implementation "
+            "and the expressions terms or, symbols or, and fallback extraction."
+        ),
+        _config_for(repo),
+        detail="focused",
+        paths=["src/evidence_service.py"],
+        terms=["terms or", "symbols or", "fallback extraction"],
+        symbols=["evidence_pack"],
+        include_history=False,
+        include_tests=False,
+        max_files=1,
+    )
+
+    entry = next(item for item in result["files"] if item["path"] == "src/evidence_service.py")
+    excerpt = (entry.get("excerpt") or {}).get("text") or ""
+    assert "focused hit context" in entry["reasons"]
+    assert "def _discovery_terms" in excerpt
+    assert "explicit = bool(terms or symbols)" in excerpt
+    assert "base = effective_terms" in excerpt
+    assert "if explicit:" in excerpt
+    assert len(json.dumps(result, separators=(",", ":"))) <= 3600
+
+
 def test_focused_compaction_never_evicts_caller_path(tmp_path: Path):
     repo = _repo(tmp_path)
 
