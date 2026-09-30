@@ -9,6 +9,7 @@ import re
 import shlex
 import shutil
 import subprocess
+import sys
 import time
 from typing import Any
 import uuid
@@ -42,7 +43,7 @@ def _codex_c_mcp_overrides() -> tuple[str, ...]:
         "mcp_servers.gremlins.enabled=true",
         'mcp_servers.gremlins.enabled_tools=["evidence_pack"]',
         'mcp_servers.gremlins.tools.evidence_pack.approval_mode="approve"',
-        'mcp_servers.gremlins.env_vars=["GREMLINS_MEASUREMENT_TAG"]',
+        'mcp_servers.gremlins.env_vars=["GREMLINS_MEASUREMENT_TAG","GREMLINS_STATE_DIR"]',
     )
 
 
@@ -52,7 +53,9 @@ def _codex_benchmark_env() -> dict[str, str]:
     real_codex_home = Path(
         os.environ.get("CODEX_HOME") or str(Path.home() / ".codex")
     ).expanduser().resolve()
-    isolated_home = benchmark_root() / "codex-isolated-home"
+    bench_root = benchmark_root()
+    state_dir = bench_root.parent.resolve()
+    isolated_home = bench_root / "codex-isolated-home"
 
     # The suite is sequential. Rebuild the treatment home for every controlled
     # child so a prior Codex process cannot leave instructions, skills, plugins,
@@ -75,7 +78,85 @@ def _codex_benchmark_env() -> dict[str, str]:
 
     env["HOME"] = str(isolated_home)
     env["CODEX_HOME"] = str(isolated_codex_home)
+    # Keep Gremlins telemetry/workspaces in the canonical outer state tree even
+    # though Codex itself receives an isolated HOME. The MCP server receives
+    # this explicit variable through the treatment config.
+    env["GREMLINS_STATE_DIR"] = str(state_dir)
     return env
+
+
+def _codex_workspace_policy_state(env: dict[str, str]) -> dict:
+    """Zero-frontier probe of the exact isolated-HOME workspace policy."""
+    state_dir = Path(env["GREMLINS_STATE_DIR"]).expanduser().resolve()
+    probe = state_dir / "benchmarks" / "codex-policy-preflight"
+    if probe.exists():
+        shutil.rmtree(probe)
+    probe.mkdir(parents=True, exist_ok=True)
+
+    git_init = subprocess.run(
+        ["git", "init", "-q"],
+        cwd=str(probe),
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=15,
+        check=False,
+        env=env,
+    )
+    if git_init.returncode != 0:
+        shutil.rmtree(probe, ignore_errors=True)
+        return {
+            "ok": False,
+            "error": "failed to initialize isolated-policy probe repository",
+            "stderr": git_init.stderr.strip()[-2000:],
+        }
+
+    probe_env = env.copy()
+    probe_env["GREMLINS_ROOT"] = str(project_root())
+    script = (
+        "import json,sys;"
+        "from gremlins.config import load_config;"
+        "from gremlins.metrics import metrics_path;"
+        "from gremlins.security import resolve_repository;"
+        "repo=resolve_repository(sys.argv[1],load_config());"
+        "print(json.dumps({'repository':str(repo),'metrics_path':str(metrics_path())}))"
+    )
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-c", script, str(probe)],
+            cwd=str(project_root()),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=20,
+            check=False,
+            env=probe_env,
+        )
+    finally:
+        shutil.rmtree(probe, ignore_errors=True)
+
+    payload: dict[str, str] = {}
+    if proc.returncode == 0:
+        try:
+            loaded = json.loads(proc.stdout.strip().splitlines()[-1])
+            if isinstance(loaded, dict):
+                payload = {str(k): str(v) for k, v in loaded.items()}
+        except (json.JSONDecodeError, IndexError):
+            payload = {}
+
+    expected_metrics = state_dir / "jobs.jsonl"
+    return {
+        "ok": (
+            proc.returncode == 0
+            and payload.get("repository") == str(probe.resolve())
+            and payload.get("metrics_path") == str(expected_metrics)
+        ),
+        "returncode": proc.returncode,
+        "repository": payload.get("repository"),
+        "metrics_path": payload.get("metrics_path"),
+        "expected_metrics_path": str(expected_metrics),
+        "stderr": proc.stderr.strip()[-2000:],
+    }
 
 
 @dataclass(frozen=True)
@@ -201,12 +282,14 @@ def _codex_c_treatment_config_state() -> dict:
         return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
     stdout = proc.stdout.strip()
     auth_detail = (auth_proc.stdout.strip() or auth_proc.stderr.strip())[-2000:]
+    workspace_policy = _codex_workspace_policy_state(env)
     return {
         "ok": (
             auth_proc.returncode == 0
             and proc.returncode == 0
             and "enabled: true" in stdout
             and "enabled_tools: evidence_pack" in stdout
+            and bool(workspace_policy.get("ok"))
         ),
         "returncode": proc.returncode,
         "stdout": stdout[-2000:],
@@ -216,6 +299,8 @@ def _codex_c_treatment_config_state() -> dict:
         "overrides": list(overrides),
         "isolated_home": env.get("HOME"),
         "isolated_codex_home": env.get("CODEX_HOME"),
+        "gremlins_state_dir": env.get("GREMLINS_STATE_DIR"),
+        "workspace_policy": workspace_policy,
     }
 
 
