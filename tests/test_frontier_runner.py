@@ -813,6 +813,94 @@ def test_suite_resumes_existing_case_arm(monkeypatch, tmp_path: Path):
     assert result["runs_completed"] == 1
 
 
+def test_suite_stops_after_first_execution_error(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr(frontier_runner, "_ensure_clean_git_repository", lambda repository: tmp_path)
+    monkeypatch.setattr(frontier_runner, "frontier_preflight", lambda repository, client: {"ok": True})
+    monkeypatch.setattr(benchmark, "benchmark_root", lambda: tmp_path)
+    monkeypatch.setattr(
+        benchmark,
+        "load_pilot_cases",
+        lambda: [{"id": "case-1"}, {"id": "case-2"}],
+    )
+    monkeypatch.setattr(frontier_runner, "load_records", lambda study: [])
+    monkeypatch.setattr(
+        frontier_runner.subprocess,
+        "run",
+        lambda *args, **kwargs: SimpleNamespace(stdout="fake-version\n", stderr="", returncode=0),
+    )
+
+    calls = []
+
+    def fake_run(**kwargs):
+        calls.append((kwargs["case_id"], kwargs["arm"]))
+        raise RuntimeError("client failed")
+
+    monkeypatch.setattr(frontier_runner, "run_frontier_case", fake_run)
+
+    result = frontier_runner.run_frontier_suite(
+        study="fail-fast",
+        repository=str(tmp_path),
+        client="codex",
+        repeats=1,
+    )
+    assert calls == [("case-1", "C")]
+    assert result["runs_completed"] == 0
+    assert result["stopped_early"] is True
+    assert result["stop_reason"]["kind"] == "execution_error"
+    assert len(result["execution_errors"]) == 1
+
+
+def test_suite_stops_after_c_native_repository_retrieval(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr(frontier_runner, "_ensure_clean_git_repository", lambda repository: tmp_path)
+    monkeypatch.setattr(frontier_runner, "frontier_preflight", lambda repository, client: {"ok": True})
+    monkeypatch.setattr(benchmark, "benchmark_root", lambda: tmp_path)
+    monkeypatch.setattr(
+        benchmark,
+        "load_pilot_cases",
+        lambda: [{"id": "case-1"}, {"id": "case-2"}],
+    )
+    monkeypatch.setattr(frontier_runner, "load_records", lambda study: [])
+    monkeypatch.setattr(
+        frontier_runner.subprocess,
+        "run",
+        lambda *args, **kwargs: SimpleNamespace(stdout="fake-version\n", stderr="", returncode=0),
+    )
+
+    calls = []
+
+    def fake_run(**kwargs):
+        calls.append((kwargs["case_id"], kwargs["arm"]))
+        return {
+            "accepted": True,
+            "usage": {},
+            "elapsed_seconds": 1.0,
+            "gremlins": {"calls": 2},
+            "frontier_direct_evidence_calls": 1,
+            "raw": {"stdout": "/tmp/case-1-C.stdout.jsonl"},
+        }
+
+    monkeypatch.setattr(frontier_runner, "run_frontier_case", fake_run)
+
+    result = frontier_runner.run_frontier_suite(
+        study="native-stop",
+        repository=str(tmp_path),
+        client="codex",
+        repeats=1,
+    )
+    assert calls == [("case-1", "C")]
+    assert result["runs_completed"] == 1
+    assert result["stopped_early"] is True
+    assert result["stop_reason"] == {
+        "kind": "c_native_repository_retrieval",
+        "case_id": "case-1",
+        "arm": "C",
+        "iteration": 1,
+        "frontier_direct_evidence_calls": 1,
+        "raw": {"stdout": "/tmp/case-1-C.stdout.jsonl"},
+    }
+    assert result["execution_errors"] == []
+
+
 def test_hidden_claim_acceptance_rejects_filename_only_answer():
     accepted, missing_paths, missing_claims = _structural_acceptance(
         "See src/gremlins/provider.py and src/gremlins/workers.py.",

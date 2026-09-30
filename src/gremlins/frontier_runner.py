@@ -1164,8 +1164,10 @@ def run_frontier_suite(
 
     Each arm receives a fresh clone of the exact same clean source snapshot.
     B/C ordering alternates by case and repetition to reduce simple warm-cache/order bias.
-    Individual task failures are recorded by run_frontier_case and do not stop the suite.
-    Execution/setup exceptions are surfaced in the returned errors list.
+    Structurally unaccepted task results are preserved and do not stop the suite.
+    Execution/setup exceptions stop the suite before another frontier run is launched.
+    A C-arm native retrieval fallback is also preserved, then stops the suite so its
+    saved trace can be inspected before any further frontier spending.
     """
     from .benchmark import build_benchmark_report, load_pilot_cases
 
@@ -1222,6 +1224,7 @@ def run_frontier_suite(
     runs: list[dict] = []
     errors: list[dict] = []
     skipped: list[dict] = []
+    stop_reason: dict | None = None
     existing = {
         (str(row.get("case_id")), str(row.get("arm")), int(row.get("iteration") or 1))
         for row in load_records(study)
@@ -1265,13 +1268,32 @@ def run_frontier_suite(
                         "elapsed_seconds": result["elapsed_seconds"],
                         "gremlins": result.get("gremlins"),
                     })
+                    if arm == "C" and int(result.get("frontier_direct_evidence_calls") or 0) > 0:
+                        stop_reason = {
+                            "kind": "c_native_repository_retrieval",
+                            "case_id": case_id,
+                            "arm": arm,
+                            "iteration": iteration,
+                            "frontier_direct_evidence_calls": int(
+                                result.get("frontier_direct_evidence_calls") or 0
+                            ),
+                            "raw": result.get("raw"),
+                        }
+                        break
                 except Exception as exc:
-                    errors.append({
+                    error = {
                         "case_id": case_id,
                         "arm": arm,
                         "iteration": iteration,
                         "error": f"{type(exc).__name__}: {exc}",
-                    })
+                    }
+                    errors.append(error)
+                    stop_reason = {"kind": "execution_error", **error}
+                    break
+            if stop_reason is not None:
+                break
+        if stop_reason is not None:
+            break
 
     report = build_benchmark_report(study)
     return {
@@ -1291,6 +1313,8 @@ def run_frontier_suite(
         "runs_skipped_existing": len(skipped),
         "skipped": skipped,
         "execution_errors": errors,
+        "stopped_early": stop_reason is not None,
+        "stop_reason": stop_reason,
         "report": report,
         "runs": runs,
     }

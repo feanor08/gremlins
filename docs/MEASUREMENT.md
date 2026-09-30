@@ -300,6 +300,8 @@ uv run gremlins benchmark frontier-preflight \
 
 The preflight verifies client readiness, clean benchmark source, the installed Gremlins MCP wrapper, wrapper/runtime-root freshness, the real MCP tool surface including `evidence_pack`, and client MCP registration. It makes **zero frontier-model calls**. A B/C suite now runs this preflight before any arm, so a broken C treatment cannot spend quota on B baselines first.
 
+The suite also stops scheduling new frontier runs after the first execution/setup error. A completed C run with native direct repository retrieval is preserved with its raw trace, then stops the suite so that fallback can be audited before any additional frontier quota is spent. Structurally unaccepted but technically valid runs remain recorded and do not stop their paired comparison.
+
 For a new treatment revision, use a fresh study name. The broad→focused contract is treatment **v3**; do not append it to any v2 study because those C arms allowed repeated broad packs. A single-case `benchmark run` refuses to append a duplicate case/arm/iteration unless `--force` is explicit. `benchmark clear --study NAME` removes the study records, provenance metadata, and saved raw streams for that study.
 
 After preflight passes, run one small paired diagnostic before the breadth pass. The final answer from each arm is explicitly required to name exact repository-relative paths supporting its concrete claims because structural acceptance checks those paths.
