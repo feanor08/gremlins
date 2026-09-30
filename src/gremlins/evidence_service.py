@@ -797,7 +797,10 @@ def _python_definition_excerpt(
     _, _, _, best = max(candidates, key=lambda item: (item[0], item[1], item[2]))
     start = max(1, int(getattr(best, "lineno", 1)))
     end = max(start, int(getattr(best, "end_lineno", start)))
-    line_count = min(24, max(8, end - start + 1))
+    # A structural definition excerpt must not spill into the next sibling
+    # definition. For short nodes, return the node's exact source span rather
+    # than padding to an arbitrary minimum context size.
+    line_count = min(24, end - start + 1)
     try:
         return read_excerpt(repo, path, config, start_line=start, line_count=line_count)
     except (OSError, RuntimeError):
