@@ -928,8 +928,13 @@ def _focused_hit_context_excerpt(
             if function_end - function_start + 1 <= 24:
                 section_lines = list(range(function_start, function_end + 1))
             else:
-                start = max(function_start, min(cluster) - 6)
-                end = min(function_end, max(cluster) + 8)
+                # Exact-verification hits often occur in the assertion/call at
+                # the end of a test or helper while the useful binding/setup
+                # sits immediately before it. Bias the bounded window backward
+                # so a task-string hit cannot hide the nearby identifier/value
+                # mapping that gives the hit meaning.
+                start = max(function_start, min(cluster) - 18)
+                end = min(function_end, max(cluster) + 5)
                 section_lines = [function_start]
                 section_lines.extend(
                     line
