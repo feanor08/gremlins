@@ -244,7 +244,7 @@ def test_commands_are_noninteractive_and_read_only(tmp_path: Path):
     assert any(value.startswith("mcp_servers.gremlins.command=") for value in codex_c)
     assert 'mcp_servers.gremlins.enabled_tools=["evidence_pack"]' in codex_c
     assert 'mcp_servers.gremlins.tools.evidence_pack.approval_mode="approve"' in codex_c
-    assert 'mcp_servers.gremlins.env_vars=["GREMLINS_MEASUREMENT_TAG"]' in codex_c
+    assert 'mcp_servers.gremlins.env_vars=["GREMLINS_MEASUREMENT_TAG","GREMLINS_STATE_DIR"]' in codex_c
     assert not any(value.startswith("skills.config=") for value in codex_c)
 
 
@@ -260,6 +260,7 @@ def test_codex_benchmark_env_isolates_user_home_and_resets_skill_state(monkeypat
     codex_home = Path(env["CODEX_HOME"])
     assert home == tmp_path / "benchmarks" / "codex-isolated-home"
     assert codex_home == home / ".codex"
+    assert env["GREMLINS_STATE_DIR"] == str(tmp_path)
     assert (codex_home / "auth.json").read_text(encoding="utf-8") == '{"token":"test"}'
     assert not (home / ".agents").exists()
     assert not (codex_home / "skills").exists()
@@ -374,8 +375,18 @@ def test_codex_preflight_validates_exact_c_treatment_config(monkeypatch):
     isolated_env = {
         "HOME": "/tmp/gremlins-codex-home",
         "CODEX_HOME": "/tmp/gremlins-codex-home/.codex",
+        "GREMLINS_STATE_DIR": "/tmp/real-gremlins-state",
     }
     monkeypatch.setattr(frontier_runner, "_codex_benchmark_env", lambda: isolated_env)
+    monkeypatch.setattr(
+        frontier_runner,
+        "_codex_workspace_policy_state",
+        lambda env: {
+            "ok": True,
+            "repository": "/tmp/real-gremlins-state/benchmarks/codex-policy-preflight",
+            "metrics_path": "/tmp/real-gremlins-state/jobs.jsonl",
+        },
+    )
     monkeypatch.setattr(frontier_runner.subprocess, "run", fake_run)
     result = frontier_runner._codex_c_treatment_config_state()
     assert result["ok"] is True
@@ -386,9 +397,44 @@ def test_codex_preflight_validates_exact_c_treatment_config(monkeypatch):
     assert env == isolated_env
     assert any(value.startswith("mcp_servers.gremlins.command=") for value in command)
     assert 'mcp_servers.gremlins.tools.evidence_pack.approval_mode="approve"' in command
-    assert 'mcp_servers.gremlins.env_vars=["GREMLINS_MEASUREMENT_TAG"]' in command
+    assert 'mcp_servers.gremlins.env_vars=["GREMLINS_MEASUREMENT_TAG","GREMLINS_STATE_DIR"]' in command
     assert not any(value.startswith("skills.config=") for value in command)
     assert command[-3:] == ["mcp", "get", "gremlins"]
+    assert result["gremlins_state_dir"] == "/tmp/real-gremlins-state"
+    assert result["workspace_policy"]["ok"] is True
+
+
+def test_codex_treatment_preflight_fails_closed_on_workspace_policy(monkeypatch):
+    isolated_env = {
+        "HOME": "/tmp/gremlins-codex-home",
+        "CODEX_HOME": "/tmp/gremlins-codex-home/.codex",
+        "GREMLINS_STATE_DIR": "/tmp/real-gremlins-state",
+    }
+
+    def fake_run(args, **kwargs):
+        if args[:3] == ["codex", "login", "status"]:
+            return SimpleNamespace(returncode=0, stdout="Logged in\n", stderr="")
+        return SimpleNamespace(
+            returncode=0,
+            stdout="gremlins\n  enabled: true\n  enabled_tools: evidence_pack\n",
+            stderr="",
+        )
+
+    monkeypatch.setattr(frontier_runner, "_codex_benchmark_env", lambda: isolated_env)
+    monkeypatch.setattr(
+        frontier_runner,
+        "_codex_workspace_policy_state",
+        lambda env: {
+            "ok": False,
+            "returncode": 1,
+            "stderr": "repository is outside allowed roots",
+        },
+    )
+    monkeypatch.setattr(frontier_runner.subprocess, "run", fake_run)
+
+    result = frontier_runner._codex_c_treatment_config_state()
+    assert result["ok"] is False
+    assert result["workspace_policy"]["ok"] is False
 
 
 def test_claude_auth_preflight_rejects_logged_out_client(monkeypatch):
