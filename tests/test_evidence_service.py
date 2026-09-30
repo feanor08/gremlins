@@ -415,7 +415,8 @@ def test_focused_named_config_paths_recover_task_terms_when_guessed_identifiers_
         ]) + "\n",
         encoding="utf-8",
     )
-    (repo / "src" / "config.py").write_text(
+    (repo / "src" / "gremlins").mkdir()
+    (repo / "src" / "gremlins" / "config.py").write_text(
         "\n".join([
             "class Limits:",
             "    max_task_chars: int",
@@ -425,7 +426,7 @@ def test_focused_named_config_paths_recover_task_terms_when_guessed_identifiers_
         ]) + "\n",
         encoding="utf-8",
     )
-    (repo / "src" / "evidence_service.py").write_text(
+    (repo / "src" / "gremlins" / "evidence_service.py").write_text(
         "\n".join([
             "def evidence_pack(config, detail):",
             "    result_budget = 3600 if detail == 'focused' else 8000",
@@ -449,7 +450,7 @@ def test_focused_named_config_paths_recover_task_terms_when_guessed_identifiers_
         "Find the frontier-facing evidence size budget and configured default.",
         _config_for(repo),
         detail="focused",
-        paths=["gremlins.toml", "src/config.py", "src/evidence_service.py"],
+        paths=["gremlins.toml", "src/gremlins/config.py", "src/gremlins/evidence_service.py"],
         terms=["size_budget", "frontier-facing"],
         symbols=["size_budget"],
         include_history=False,
@@ -459,11 +460,11 @@ def test_focused_named_config_paths_recover_task_terms_when_guessed_identifiers_
 
     by_path = {item["path"]: item for item in result["files"]}
     assert "gremlins.toml" in by_path
-    assert "src/config.py" in by_path
-    assert "src/evidence_service.py" in by_path
+    assert "src/gremlins/config.py" in by_path
+    assert "src/gremlins/evidence_service.py" in by_path
 
     toml = by_path["gremlins.toml"]
-    config = by_path["src/config.py"]
+    config = by_path["src/gremlins/config.py"]
     assert "evidence" in [term.lower() for term in toml["recovery_terms"]]
     assert "evidence" in [term.lower() for term in config["recovery_terms"]]
     assert any(
