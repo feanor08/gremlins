@@ -269,7 +269,11 @@ def test_c_prompt_prefers_iterative_evidence_pack_before_frontier_redo():
     assert "The FIRST evidence_pack call must use detail='broad'" in prompt
     assert "Every LATER evidence_pack call must use detail='focused'" in prompt
     assert "Do not make a second broad call" in prompt
+    assert "Use at most two exploratory focused follow-ups" in prompt
+    assert "reserve the fourth and final permitted Gremlins call for exact verification" in prompt
+    assert "pass the suspected function name in symbols when known" in prompt
     assert "Prefer another focused evidence_pack over direct Read/Grep/Glob retrieval" in prompt
+    assert "Use direct Read/Grep/Glob only if the final exact Gremlins verification still lacks evidence" in prompt
     assert "Bash, web tools, and write/edit tools are unavailable in this arm" in prompt
     assert "FRONTIER_REDO_SEARCH=true" in prompt
     assert "Gremlins supplies evidence, not root-cause or architecture conclusions" in prompt
