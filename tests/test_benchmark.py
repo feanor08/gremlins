@@ -471,6 +471,43 @@ def test_study_provenance_cannot_be_mixed(monkeypatch, tmp_path: Path):
 
 
 
+def test_codex_treatment_environment_is_immutable_provenance(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr(benchmark, "benchmark_root", lambda: tmp_path)
+    write_study_metadata("codex-stable", {
+        "client": "codex",
+        "client_version": "0.159.2",
+        "requested_model": None,
+        "source_head": "source-1",
+        "gremlins_head": "gremlins-1",
+        "include_a": False,
+        "codex_treatment_home": "isolated-v1",
+        "codex_state_dir_mode": "explicit-shared-v1",
+    })
+
+    assert_study_compatible("codex-stable", {
+        "client": "codex",
+        "client_version": "0.159.2",
+        "requested_model": None,
+        "source_head": "source-1",
+        "gremlins_head": "gremlins-1",
+        "include_a": False,
+        "codex_treatment_home": "isolated-v1",
+        "codex_state_dir_mode": "explicit-shared-v1",
+    })
+
+    with pytest.raises(RuntimeError, match="codex_state_dir_mode"):
+        assert_study_compatible("codex-stable", {
+            "client": "codex",
+            "client_version": "0.159.2",
+            "requested_model": None,
+            "source_head": "source-1",
+            "gremlins_head": "gremlins-1",
+            "include_a": False,
+            "codex_treatment_home": "isolated-v1",
+            "codex_state_dir_mode": "isolated-v0",
+        })
+
+
 def test_local_pilot_hides_answer_key_from_worker(monkeypatch, tmp_path: Path):
     repo = tmp_path / "repo"
     repo.mkdir()
