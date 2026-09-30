@@ -711,7 +711,7 @@ def _codex_command(
     allow_agents: bool = False,
     gremlins_mode: str | None = None,
 ) -> list[str]:
-    args = ["codex"]
+    args = ["codex", "-c", 'approval_policy="never"']
     if not allow_agents:
         args.extend([
             "-c",

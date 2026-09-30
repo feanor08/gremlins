@@ -195,11 +195,13 @@ def test_commands_are_noninteractive_and_read_only(tmp_path: Path):
 
     codex = _codex_command("task", tmp_path, "model-y")
     assert codex[0] == "codex"
+    assert 'approval_policy="never"' in codex
     assert "agents.enabled=false" in codex
     assert "exec" in codex
     assert "--json" in codex
     assert "--ephemeral" in codex
     assert "read-only" in codex
+    assert codex[codex.index("--sandbox") + 1] == "read-only"
     assert str(tmp_path) in codex
 
     codex_b = _codex_command(
@@ -208,7 +210,9 @@ def test_commands_are_noninteractive_and_read_only(tmp_path: Path):
         "model-y",
         gremlins_mode="disabled",
     )
+    assert 'approval_policy="never"' in codex_b
     assert "mcp_servers.gremlins.enabled=false" in codex_b
+    assert codex_b[codex_b.index("--sandbox") + 1] == "read-only"
     assert any(value.startswith("skills.config=") for value in codex_b)
 
     codex_c = _codex_command(
@@ -217,7 +221,9 @@ def test_commands_are_noninteractive_and_read_only(tmp_path: Path):
         "model-y",
         gremlins_mode="evidence-pack-only",
     )
+    assert 'approval_policy="never"' in codex_c
     assert "mcp_servers.gremlins.enabled=true" in codex_c
+    assert codex_c[codex_c.index("--sandbox") + 1] == "read-only"
     assert 'mcp_servers.gremlins.enabled_tools=["evidence_pack"]' in codex_c
     assert 'mcp_servers.gremlins.tools.evidence_pack.approval_mode="approve"' in codex_c
     assert 'mcp_servers.gremlins.env_vars=["GREMLINS_MEASUREMENT_TAG"]' in codex_c
