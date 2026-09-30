@@ -261,7 +261,7 @@ frontier reasoning
 
 Every C-arm evidence-pack call must reuse the run's unique measurement tag. Other Gremlins capabilities and local-model calls make the treatment invalid. The first pack uses the broad result budget; later focused packs are capped at 3,600 characters and four detailed files. Direct frontier `Read`/`Grep`/`Glob` remains available only as fallback so the benchmark can measure when Gremlins is insufficient; Bash, web, and write/edit tools are blocked. The response must report `FRONTIER_REDO_SEARCH=true` if direct frontier retrieval occurs.
 
-Claude enforcement uses the CLI tool allow/deny surface. Codex enforcement uses per-run config overrides: arm B sets `mcp_servers.gremlins.enabled=false`; arm C enables the Gremlins MCP server and restricts it to `evidence_pack`. Both B and C disable client subagents.
+Claude enforcement uses the CLI tool allow/deny surface. Codex enforcement uses per-run config overrides: arm B sets `mcp_servers.gremlins.enabled=false`; arm C enables the Gremlins MCP server, restricts it to `evidence_pack`, and pre-approves that read-only treatment tool with `mcp_servers.gremlins.tools.evidence_pack.approval_mode="approve"` so noninteractive `approval_policy=never` runs can execute it. Both B and C disable client subagents.
 
 The runner now records, in addition to tokens/acceptance/elapsed time:
 

@@ -218,6 +218,7 @@ def test_commands_are_noninteractive_and_read_only(tmp_path: Path):
     )
     assert "mcp_servers.gremlins.enabled=true" in codex_c
     assert 'mcp_servers.gremlins.enabled_tools=["evidence_pack"]' in codex_c
+    assert 'mcp_servers.gremlins.tools.evidence_pack.approval_mode="approve"' in codex_c
 
 
 def test_structural_acceptance_and_redo_marker():
@@ -297,11 +298,31 @@ def test_frontier_preflight_checks_wrapper_registration_and_tool_surface(monkeyp
         "missing_tools": [],
     })
     monkeypatch.setattr(frontier_runner, "_mcp_registration_state", lambda client: {"ok": True})
+    monkeypatch.setattr(frontier_runner, "_codex_c_treatment_config_state", lambda: {"ok": True})
 
     result = frontier_preflight(repo, "claude")
     assert result["ok"] is True
     assert result["checks"]["evidence_pack_present"] is True
     assert result["frontier_model_calls"] == 0
+
+
+def test_codex_preflight_validates_exact_c_treatment_config(monkeypatch):
+    captured = []
+
+    def fake_run(args, **kwargs):
+        captured.append(args)
+        return SimpleNamespace(
+            returncode=0,
+            stdout="gremlins\n  enabled: true\n  enabled_tools: evidence_pack\n",
+            stderr="",
+        )
+
+    monkeypatch.setattr(frontier_runner.subprocess, "run", fake_run)
+    result = frontier_runner._codex_c_treatment_config_state()
+    assert result["ok"] is True
+    command = captured[0]
+    assert 'mcp_servers.gremlins.tools.evidence_pack.approval_mode="approve"' in command
+    assert command[-3:] == ["mcp", "get", "gremlins"]
 
 
 def test_claude_auth_preflight_rejects_logged_out_client(monkeypatch):

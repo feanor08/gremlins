@@ -30,6 +30,13 @@ from .benchmark import (
 )
 
 
+_CODEX_C_MCP_OVERRIDES = (
+    "mcp_servers.gremlins.enabled=true",
+    'mcp_servers.gremlins.enabled_tools=["evidence_pack"]',
+    'mcp_servers.gremlins.tools.evidence_pack.approval_mode="approve"',
+)
+
+
 @dataclass(frozen=True)
 class ClientRun:
     success: bool
@@ -123,6 +130,36 @@ def _mcp_registration_state(client: str) -> dict:
     }
 
 
+def _codex_c_treatment_config_state() -> dict:
+    args = ["codex"]
+    for override in _CODEX_C_MCP_OVERRIDES:
+        args.extend(["-c", override])
+    args.extend(["mcp", "get", "gremlins"])
+    try:
+        proc = subprocess.run(
+            args,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=15,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+    stdout = proc.stdout.strip()
+    return {
+        "ok": (
+            proc.returncode == 0
+            and "enabled: true" in stdout
+            and "enabled_tools: evidence_pack" in stdout
+        ),
+        "returncode": proc.returncode,
+        "stdout": stdout[-2000:],
+        "stderr": proc.stderr.strip()[-2000:],
+        "overrides": list(_CODEX_C_MCP_OVERRIDES),
+    }
+
+
 def frontier_preflight(repository: str | Path, client: str) -> dict:
     """Zero-frontier-token readiness check for a controlled integration run."""
     source = Path(repository).expanduser().resolve()
@@ -156,6 +193,11 @@ def frontier_preflight(repository: str | Path, client: str) -> dict:
     }
     module_smoke = check_python_module()
     registration = _mcp_registration_state(client)
+    codex_c_treatment_config = (
+        _codex_c_treatment_config_state()
+        if client == "codex"
+        else {"ok": True, "not_applicable": True}
+    )
     evidence_pack_present = "evidence_pack" in (wrapper_smoke.get("tools") or [])
 
     checks = {
@@ -167,6 +209,7 @@ def frontier_preflight(repository: str | Path, client: str) -> dict:
         "module_mcp_smoke": bool(module_smoke.get("ok")),
         "evidence_pack_present": evidence_pack_present,
         "client_registration_present": bool(registration.get("ok")),
+        "codex_c_treatment_config_valid": bool(codex_c_treatment_config.get("ok")),
     }
     remediation: list[str] = []
     if not wrapper_exists or not wrapper_root_matches or not wrapper_smoke.get("ok"):
@@ -187,6 +230,7 @@ def frontier_preflight(repository: str | Path, client: str) -> dict:
         "wrapper_smoke": wrapper_smoke,
         "module_smoke": module_smoke,
         "registration": registration,
+        "codex_c_treatment_config": codex_c_treatment_config,
         "remediation": list(dict.fromkeys(remediation)),
         "frontier_model_calls": 0,
     }
@@ -667,12 +711,8 @@ def _codex_command(
     if gremlins_mode == "disabled":
         args.extend(["-c", "mcp_servers.gremlins.enabled=false"])
     elif gremlins_mode == "evidence-pack-only":
-        args.extend([
-            "-c",
-            "mcp_servers.gremlins.enabled=true",
-            "-c",
-            'mcp_servers.gremlins.enabled_tools=["evidence_pack"]',
-        ])
+        for override in _CODEX_C_MCP_OVERRIDES:
+            args.extend(["-c", override])
     elif gremlins_mode is not None:
         raise ValueError("gremlins_mode must be disabled, evidence-pack-only, or None")
 
