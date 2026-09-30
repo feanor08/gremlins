@@ -1078,7 +1078,7 @@ def _file_entry(
 
     matched = _search_terms_for_path(path, hits, search_terms)
     score = len(set(term.lower() for term in matched)) * 10 + len(hits) * 2 + (6 if focused else 0)
-    return {
+    entry = {
         "path": path,
         "role": _path_role(path),
         "score": score,
@@ -1094,7 +1094,6 @@ def _file_entry(
             + ([f"matched {len(set(matched))} query term(s)"] if matched else ["path/name relevance"])
         ),
         "matched_terms": matched[:8],
-        "recovery_terms": recovery_terms[:4],
         "hits": [
             {"line": item.start_line, "text": item.text[:260]}
             for item in hits
@@ -1109,6 +1108,9 @@ def _file_entry(
             else None
         ),
     }
+    if recovery_terms:
+        entry["recovery_terms"] = recovery_terms[:4]
+    return entry
 
 
 def _history_bundle(
