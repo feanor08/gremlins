@@ -807,6 +807,120 @@ def _python_definition_excerpt(
         return None
 
 
+def _focused_hit_context_excerpt(
+    repo: Path,
+    path: str,
+    hits: Sequence[Evidence],
+    task: str,
+    search_terms: Sequence[str],
+    config: Config,
+) -> Evidence | None:
+    """Return compact multi-region context when exact code hits matter more than a definition."""
+    intent = task.lower()
+    if not any(word in intent for word in ("around", "context", "handler", "branch", "hit-centered")):
+        return None
+
+    code_terms = [
+        term.strip().lower()
+        for term in search_terms
+        if term.strip()
+        and (
+            any(char in term for char in ("=", ":", "(", ")", '"', "'"))
+            or term.strip().lower().startswith(("except ", "return ", "raise "))
+        )
+    ]
+    if not code_terms:
+        return None
+
+    anchor_lines = sorted({
+        int(hit.start_line)
+        for hit in hits
+        if hit.start_line is not None
+        and any(term in hit.text.lower() for term in code_terms)
+    })
+    if not anchor_lines:
+        return None
+
+    try:
+        file = resolve_repo_file(repo, path)
+        source = file.read_text(encoding="utf-8", errors="replace")
+        lines = source.splitlines()
+    except (OSError, RuntimeError):
+        return None
+
+    clusters: list[list[int]] = []
+    for line in anchor_lines:
+        if clusters and line - clusters[-1][-1] <= 12:
+            clusters[-1].append(line)
+        else:
+            clusters.append([line])
+    clusters = clusters[:2]
+
+    # A repository-wide literal search may cap later matches before every
+    # same-file status line is returned. Complete each exact handler cluster
+    # from the already-open source so nearby requested literals survive.
+    for cluster in clusters:
+        scan_end = min(len(lines), max(cluster) + 16)
+        for line in range(min(cluster), scan_end + 1):
+            if any(term in lines[line - 1].lower() for term in code_terms):
+                cluster.append(line)
+        cluster[:] = sorted(set(cluster))
+
+    functions: list[ast.AST] = []
+    if Path(path).suffix.lower() == ".py":
+        try:
+            tree = ast.parse(source)
+            functions = [
+                node for node in ast.walk(tree)
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            ]
+        except SyntaxError:
+            functions = []
+
+    sections: list[str] = []
+    selected_lines: list[int] = []
+    for cluster in clusters:
+        start = max(1, min(cluster) - 1)
+        end = min(len(lines), max(cluster) + 2)
+        containing = [
+            node for node in functions
+            if int(getattr(node, "lineno", 0)) <= min(cluster)
+            <= int(getattr(node, "end_lineno", 0))
+        ]
+        function_line = None
+        if containing:
+            enclosing = min(
+                containing,
+                key=lambda node: int(getattr(node, "end_lineno", 0)) - int(getattr(node, "lineno", 0)),
+            )
+            function_line = int(getattr(enclosing, "lineno", 0))
+
+        priority_lines: list[int] = []
+        if function_line and function_line < start:
+            priority_lines.append(function_line)
+        priority_lines.extend(cluster)
+        context_lines = [
+            line for line in range(start, end + 1)
+            if line not in priority_lines
+        ]
+        # Put the enclosing definition and exact requested hits first so a
+        # compact wire-budget trim cannot discard a later handler/status pair.
+        section_lines = [*priority_lines, *context_lines]
+        selected_lines.extend(section_lines)
+        sections.append("\n".join(f"L{line}: {lines[line - 1]}" for line in section_lines))
+
+    if not sections:
+        return None
+    return Evidence(
+        id=f"file:{path}:focused-hits:{'-'.join(str(line) for line in anchor_lines[:4])}",
+        kind="file",
+        path=path,
+        start_line=min(selected_lines),
+        end_line=max(selected_lines),
+        text="\n...\n".join(sections),
+    )
+
+
 def _file_entry(
     repo: Path,
     path: str,
@@ -816,13 +930,24 @@ def _file_entry(
     focused: bool,
     task: str,
 ) -> dict:
-    hits = [item for item in evidence if item.kind == "search" and item.path == path][:3]
+    all_hits = [item for item in evidence if item.kind == "search" and item.path == path]
+    hits = all_hits[:4 if focused else 3]
     excerpt = next(
         (item for item in evidence if item.kind == "file" and item.path == path),
         None,
     )
+    hit_context_excerpt = None
     definition_excerpt = None
-    if focused and _definition_intent(task, search_terms):
+    if focused:
+        hit_context_excerpt = _focused_hit_context_excerpt(
+            repo,
+            path,
+            all_hits,
+            task,
+            search_terms,
+            config,
+        )
+    if focused and hit_context_excerpt is None and _definition_intent(task, search_terms):
         definition_excerpt = _python_definition_excerpt(
             repo,
             path,
@@ -830,7 +955,9 @@ def _file_entry(
             search_terms,
             config,
         )
-    if definition_excerpt is not None:
+    if hit_context_excerpt is not None:
+        excerpt = hit_context_excerpt
+    elif definition_excerpt is not None:
         excerpt = definition_excerpt
     if excerpt is None:
         start_line = max(1, int(hits[0].start_line or 1) - 3) if hits else 1
@@ -847,6 +974,7 @@ def _file_entry(
         "score": score,
         "reasons": (
             (["caller-focused path"] if focused else [])
+            + (["focused hit context"] if hit_context_excerpt is not None else [])
             + (["focused symbol definition"] if definition_excerpt is not None else [])
             + ([f"matched {len(set(matched))} query term(s)"] if matched else ["path/name relevance"])
         ),
@@ -859,7 +987,7 @@ def _file_entry(
             {
                 "start_line": excerpt.start_line,
                 "end_line": excerpt.end_line,
-                "text": excerpt.text[:700],
+                "text": excerpt.text[:1200 if hit_context_excerpt is not None else 700],
             }
             if excerpt is not None
             else None

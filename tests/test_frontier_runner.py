@@ -209,6 +209,7 @@ def test_commands_are_noninteractive_and_read_only(tmp_path: Path):
         gremlins_mode="disabled",
     )
     assert "mcp_servers.gremlins.enabled=false" in codex_b
+    assert any(value.startswith("skills.config=") for value in codex_b)
 
     codex_c = _codex_command(
         "task",
@@ -219,6 +220,10 @@ def test_commands_are_noninteractive_and_read_only(tmp_path: Path):
     assert "mcp_servers.gremlins.enabled=true" in codex_c
     assert 'mcp_servers.gremlins.enabled_tools=["evidence_pack"]' in codex_c
     assert 'mcp_servers.gremlins.tools.evidence_pack.approval_mode="approve"' in codex_c
+    assert 'mcp_servers.gremlins.env_vars=["GREMLINS_MEASUREMENT_TAG"]' in codex_c
+    skill_override = next(value for value in codex_c if value.startswith("skills.config="))
+    assert "gremlins-delegation" in skill_override
+    assert '"enabled": false' in skill_override
 
 
 def test_structural_acceptance_and_redo_marker():
@@ -322,6 +327,8 @@ def test_codex_preflight_validates_exact_c_treatment_config(monkeypatch):
     assert result["ok"] is True
     command = captured[0]
     assert 'mcp_servers.gremlins.tools.evidence_pack.approval_mode="approve"' in command
+    assert 'mcp_servers.gremlins.env_vars=["GREMLINS_MEASUREMENT_TAG"]' in command
+    assert any(value.startswith("skills.config=") for value in command)
     assert command[-3:] == ["mcp", "get", "gremlins"]
 
 

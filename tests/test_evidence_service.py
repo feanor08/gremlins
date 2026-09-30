@@ -210,6 +210,55 @@ def test_focused_python_pack_prefers_relevant_function_definition(tmp_path: Path
     assert len(json.dumps(result, separators=(",", ":"))) <= 3600
 
 
+def test_focused_handler_request_returns_multiple_exact_hit_regions(tmp_path: Path):
+    repo = _repo(tmp_path)
+    workers = repo / "src" / "workers.py"
+    workers.write_text(
+        "\n".join([
+            "def repo_explore():",
+            "    try:",
+            "        run_provider()",
+            "    except ProviderBusy as exc:",
+            "        result = {'error': str(exc)}",
+            "        status = \"busy\"",
+            "    return status",
+            *[f"padding_{index} = {index}" for index in range(30)],
+            "def triage():",
+            "    try:",
+            "        run_provider()",
+            "    except ProviderBusy as exc:",
+            "        result = {'error': str(exc)}",
+            "        status = \"busy\"",
+            "    return status",
+        ]) + "\n",
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "add", "src/workers.py"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "add busy handlers"], cwd=repo, check=True)
+
+    result = evidence_pack(
+        str(repo),
+        "Exact final verification: show context around both ProviderBusy handlers and status assignments.",
+        _config_for(repo),
+        detail="focused",
+        paths=["src/workers.py"],
+        terms=["except ProviderBusy as exc:", 'status = "busy"'],
+        symbols=["ProviderBusy"],
+        include_history=False,
+        include_tests=False,
+        max_files=1,
+    )
+
+    entry = next(item for item in result["files"] if item["path"] == "src/workers.py")
+    excerpt = entry["excerpt"]["text"]
+    assert "focused hit context" in entry["reasons"]
+    assert "def repo_explore" in excerpt
+    assert "def triage" in excerpt
+    assert excerpt.count("except ProviderBusy as exc:") == 2
+    assert excerpt.count('status = "busy"') == 2
+    assert len(json.dumps(result, separators=(",", ":"))) <= 3600
+
+
 def test_focused_compaction_never_evicts_caller_path(tmp_path: Path):
     repo = _repo(tmp_path)
 

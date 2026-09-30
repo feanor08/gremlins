@@ -34,7 +34,13 @@ _CODEX_C_MCP_OVERRIDES = (
     "mcp_servers.gremlins.enabled=true",
     'mcp_servers.gremlins.enabled_tools=["evidence_pack"]',
     'mcp_servers.gremlins.tools.evidence_pack.approval_mode="approve"',
+    'mcp_servers.gremlins.env_vars=["GREMLINS_MEASUREMENT_TAG"]',
 )
+
+
+def _codex_gremlins_skill_override() -> str:
+    skill = Path("~/.codex/skills/gremlins-delegation").expanduser()
+    return "skills.config=" + json.dumps([{"path": str(skill), "enabled": False}])
 
 
 @dataclass(frozen=True)
@@ -134,6 +140,7 @@ def _codex_c_treatment_config_state() -> dict:
     args = ["codex"]
     for override in _CODEX_C_MCP_OVERRIDES:
         args.extend(["-c", override])
+    args.extend(["-c", _codex_gremlins_skill_override()])
     args.extend(["mcp", "get", "gremlins"])
     try:
         proc = subprocess.run(
@@ -706,7 +713,12 @@ def _codex_command(
 ) -> list[str]:
     args = ["codex"]
     if not allow_agents:
-        args.extend(["-c", "agents.enabled=false"])
+        args.extend([
+            "-c",
+            "agents.enabled=false",
+            "-c",
+            _codex_gremlins_skill_override(),
+        ])
 
     if gremlins_mode == "disabled":
         args.extend(["-c", "mcp_servers.gremlins.enabled=false"])
