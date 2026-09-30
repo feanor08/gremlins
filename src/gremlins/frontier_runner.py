@@ -31,17 +31,51 @@ from .benchmark import (
 )
 
 
-_CODEX_C_MCP_OVERRIDES = (
-    "mcp_servers.gremlins.enabled=true",
-    'mcp_servers.gremlins.enabled_tools=["evidence_pack"]',
-    'mcp_servers.gremlins.tools.evidence_pack.approval_mode="approve"',
-    'mcp_servers.gremlins.env_vars=["GREMLINS_MEASUREMENT_TAG"]',
-)
+def _codex_mcp_command_override() -> str:
+    wrapper = Path("~/.local/bin/gremlins-mcp").expanduser()
+    return f"mcp_servers.gremlins.command={json.dumps(str(wrapper))}"
 
 
-def _codex_gremlins_skill_override() -> str:
-    skill = Path("~/.codex/skills/gremlins-delegation").expanduser()
-    return f"skills.config=[{{path={json.dumps(str(skill))},enabled=false}}]"
+def _codex_c_mcp_overrides() -> tuple[str, ...]:
+    return (
+        _codex_mcp_command_override(),
+        "mcp_servers.gremlins.enabled=true",
+        'mcp_servers.gremlins.enabled_tools=["evidence_pack"]',
+        'mcp_servers.gremlins.tools.evidence_pack.approval_mode="approve"',
+        'mcp_servers.gremlins.env_vars=["GREMLINS_MEASUREMENT_TAG"]',
+    )
+
+
+def _codex_benchmark_env() -> dict[str, str]:
+    """Run controlled Codex children without user-level instructions or skills."""
+    env = os.environ.copy()
+    real_codex_home = Path(
+        os.environ.get("CODEX_HOME") or str(Path.home() / ".codex")
+    ).expanduser().resolve()
+    isolated_home = benchmark_root() / "codex-isolated-home"
+
+    # The suite is sequential. Rebuild the treatment home for every controlled
+    # child so a prior Codex process cannot leave instructions, skills, plugins,
+    # or config state that contaminates a later arm.
+    if isolated_home.exists():
+        shutil.rmtree(isolated_home)
+    isolated_codex_home = isolated_home / ".codex"
+    isolated_codex_home.mkdir(parents=True, exist_ok=True)
+
+    # ChatGPT-plan auth may be stored in CODEX_HOME/auth.json. Expose only that
+    # credential file when present; keyring-backed logins need no copied state.
+    source_auth = real_codex_home / "auth.json"
+    if source_auth.is_file():
+        target_auth = isolated_codex_home / "auth.json"
+        try:
+            target_auth.symlink_to(source_auth)
+        except OSError:
+            shutil.copy2(source_auth, target_auth)
+            target_auth.chmod(0o600)
+
+    env["HOME"] = str(isolated_home)
+    env["CODEX_HOME"] = str(isolated_codex_home)
+    return env
 
 
 @dataclass(frozen=True)
@@ -139,10 +173,11 @@ def _mcp_registration_state(client: str) -> dict:
 
 def _codex_c_treatment_config_state() -> dict:
     args = ["codex"]
-    for override in _CODEX_C_MCP_OVERRIDES:
+    overrides = _codex_c_mcp_overrides()
+    for override in overrides:
         args.extend(["-c", override])
-    args.extend(["-c", _codex_gremlins_skill_override()])
     args.extend(["mcp", "get", "gremlins"])
+    env = _codex_benchmark_env()
     try:
         proc = subprocess.run(
             args,
@@ -151,6 +186,7 @@ def _codex_c_treatment_config_state() -> dict:
             stderr=subprocess.PIPE,
             timeout=15,
             check=False,
+            env=env,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
@@ -164,7 +200,9 @@ def _codex_c_treatment_config_state() -> dict:
         "returncode": proc.returncode,
         "stdout": stdout[-2000:],
         "stderr": proc.stderr.strip()[-2000:],
-        "overrides": list(_CODEX_C_MCP_OVERRIDES),
+        "overrides": list(overrides),
+        "isolated_home": env.get("HOME"),
+        "isolated_codex_home": env.get("CODEX_HOME"),
     }
 
 
@@ -200,11 +238,18 @@ def frontier_preflight(repository: str | Path, client: str) -> dict:
         "error": f"wrapper missing: {wrapper}",
     }
     module_smoke = check_python_module()
-    registration = _mcp_registration_state(client)
     codex_c_treatment_config = (
         _codex_c_treatment_config_state()
         if client == "codex"
         else {"ok": True, "not_applicable": True}
+    )
+    # Codex treatment children use a fresh isolated HOME/CODEX_HOME and inject
+    # the Gremlins stdio command explicitly, so the user's global registration
+    # is intentionally not part of the controlled benchmark surface.
+    registration = (
+        codex_c_treatment_config
+        if client == "codex"
+        else _mcp_registration_state(client)
     )
     evidence_pack_present = "evidence_pack" in (wrapper_smoke.get("tools") or [])
 
@@ -748,17 +793,17 @@ def _codex_command(
 ) -> list[str]:
     args = ["codex", "-c", 'approval_policy="never"']
     if not allow_agents:
-        args.extend([
-            "-c",
-            "agents.enabled=false",
-            "-c",
-            _codex_gremlins_skill_override(),
-        ])
+        args.extend(["-c", "agents.enabled=false"])
 
     if gremlins_mode == "disabled":
-        args.extend(["-c", "mcp_servers.gremlins.enabled=false"])
+        args.extend([
+            "-c",
+            _codex_mcp_command_override(),
+            "-c",
+            "mcp_servers.gremlins.enabled=false",
+        ])
     elif gremlins_mode == "evidence-pack-only":
-        for override in _CODEX_C_MCP_OVERRIDES:
+        for override in _codex_c_mcp_overrides():
             args.extend(["-c", override])
     elif gremlins_mode is not None:
         raise ValueError("gremlins_mode must be disabled, evidence-pack-only, or None")
@@ -880,6 +925,7 @@ def _ensure_study_provenance(
         "include_a": include_a,
         "claude_tool_search": "disabled-preload" if client == "claude" else None,
         "claude_ai_mcp_servers": False if client == "claude" else None,
+        "codex_treatment_home": "isolated-v1" if client == "codex" else None,
     }
     assert_study_compatible(study, payload)
     write_study_metadata(study, payload)
@@ -982,6 +1028,8 @@ def run_frontier_case(
     run_env = None
     if client == "claude" and arm in {"B", "C"}:
         run_env = _claude_benchmark_env()
+    elif client == "codex" and arm in {"B", "C"}:
+        run_env = _codex_benchmark_env()
     if arm == "C" and unique_tag:
         if run_env is None:
             run_env = os.environ.copy()
