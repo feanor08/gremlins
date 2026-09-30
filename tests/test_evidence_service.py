@@ -264,8 +264,7 @@ def test_exact_verification_prefers_enclosing_function_around_literal_hit(tmp_pa
     service = repo / "src" / "evidence_service.py"
     service.write_text(
         "\n".join([
-            "def effective_terms(task, terms=None, symbols=None):",
-            "    return [*(terms or []), *(symbols or [])]",
+            "from retrieval import effective_terms",
             "",
             "def _discovery_terms(task, terms=None, symbols=None):",
             "    explicit = bool(terms or symbols)",
