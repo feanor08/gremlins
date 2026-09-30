@@ -229,7 +229,8 @@ def test_commands_are_noninteractive_and_read_only(tmp_path: Path):
     assert 'approval_policy="never"' in codex_b
     assert "mcp_servers.gremlins.enabled=false" in codex_b
     assert codex_b[codex_b.index("--sandbox") + 1] == "read-only"
-    assert any(value.startswith("skills.config=") for value in codex_b)
+    assert any(value.startswith("mcp_servers.gremlins.command=") for value in codex_b)
+    assert not any(value.startswith("skills.config=") for value in codex_b)
 
     codex_c = _codex_command(
         "task",
@@ -240,13 +241,36 @@ def test_commands_are_noninteractive_and_read_only(tmp_path: Path):
     assert 'approval_policy="never"' in codex_c
     assert "mcp_servers.gremlins.enabled=true" in codex_c
     assert codex_c[codex_c.index("--sandbox") + 1] == "read-only"
+    assert any(value.startswith("mcp_servers.gremlins.command=") for value in codex_c)
     assert 'mcp_servers.gremlins.enabled_tools=["evidence_pack"]' in codex_c
     assert 'mcp_servers.gremlins.tools.evidence_pack.approval_mode="approve"' in codex_c
     assert 'mcp_servers.gremlins.env_vars=["GREMLINS_MEASUREMENT_TAG"]' in codex_c
-    skill_override = next(value for value in codex_c if value.startswith("skills.config="))
-    assert "gremlins-delegation" in skill_override
-    assert skill_override.startswith('skills.config=[{path="')
-    assert skill_override.endswith(',enabled=false}]')
+    assert not any(value.startswith("skills.config=") for value in codex_c)
+
+
+def test_codex_benchmark_env_isolates_user_home_and_resets_skill_state(monkeypatch, tmp_path: Path):
+    real_codex_home = tmp_path / "real-codex"
+    real_codex_home.mkdir()
+    (real_codex_home / "auth.json").write_text('{"token":"test"}', encoding="utf-8")
+    monkeypatch.setenv("CODEX_HOME", str(real_codex_home))
+    monkeypatch.setattr(frontier_runner, "benchmark_root", lambda: tmp_path / "benchmarks")
+
+    env = frontier_runner._codex_benchmark_env()
+    home = Path(env["HOME"])
+    codex_home = Path(env["CODEX_HOME"])
+    assert home == tmp_path / "benchmarks" / "codex-isolated-home"
+    assert codex_home == home / ".codex"
+    assert (codex_home / "auth.json").read_text(encoding="utf-8") == '{"token":"test"}'
+    assert not (home / ".agents").exists()
+    assert not (codex_home / "skills").exists()
+
+    # Any state created by one controlled child is removed before the next.
+    poison = codex_home / "skills" / "gremlins-delegation"
+    poison.mkdir(parents=True)
+    (poison / "SKILL.md").write_text("poison", encoding="utf-8")
+    env2 = frontier_runner._codex_benchmark_env()
+    assert env2["HOME"] == str(home)
+    assert not (Path(env2["CODEX_HOME"]) / "skills").exists()
 
 
 def test_structural_acceptance_and_redo_marker():
@@ -338,20 +362,27 @@ def test_codex_preflight_validates_exact_c_treatment_config(monkeypatch):
     captured = []
 
     def fake_run(args, **kwargs):
-        captured.append(args)
+        captured.append((args, kwargs.get("env")))
         return SimpleNamespace(
             returncode=0,
             stdout="gremlins\n  enabled: true\n  enabled_tools: evidence_pack\n",
             stderr="",
         )
 
+    isolated_env = {
+        "HOME": "/tmp/gremlins-codex-home",
+        "CODEX_HOME": "/tmp/gremlins-codex-home/.codex",
+    }
+    monkeypatch.setattr(frontier_runner, "_codex_benchmark_env", lambda: isolated_env)
     monkeypatch.setattr(frontier_runner.subprocess, "run", fake_run)
     result = frontier_runner._codex_c_treatment_config_state()
     assert result["ok"] is True
-    command = captured[0]
+    command, env = captured[0]
+    assert env == isolated_env
+    assert any(value.startswith("mcp_servers.gremlins.command=") for value in command)
     assert 'mcp_servers.gremlins.tools.evidence_pack.approval_mode="approve"' in command
     assert 'mcp_servers.gremlins.env_vars=["GREMLINS_MEASUREMENT_TAG"]' in command
-    assert any(value.startswith("skills.config=") for value in command)
+    assert not any(value.startswith("skills.config=") for value in command)
     assert command[-3:] == ["mcp", "get", "gremlins"]
 
 
