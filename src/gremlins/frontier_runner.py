@@ -93,22 +93,32 @@ def _codex_workspace_policy_state(env: dict[str, str]) -> dict:
         shutil.rmtree(probe)
     probe.mkdir(parents=True, exist_ok=True)
 
-    git_init = subprocess.run(
-        ["git", "init", "-q"],
-        cwd=str(probe),
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        timeout=15,
-        check=False,
-        env=env,
-    )
+    try:
+        git_init = subprocess.run(
+            ["git", "init", "-q"],
+            cwd=str(probe),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=15,
+            check=False,
+            env=env,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        shutil.rmtree(probe, ignore_errors=True)
+        return {
+            "ok": False,
+            "error": f"{type(exc).__name__}: {exc}",
+            "stage": "git-init",
+        }
+
     if git_init.returncode != 0:
         shutil.rmtree(probe, ignore_errors=True)
         return {
             "ok": False,
             "error": "failed to initialize isolated-policy probe repository",
             "stderr": git_init.stderr.strip()[-2000:],
+            "stage": "git-init",
         }
 
     probe_env = env.copy()
@@ -132,6 +142,12 @@ def _codex_workspace_policy_state(env: dict[str, str]) -> dict:
             check=False,
             env=probe_env,
         )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return {
+            "ok": False,
+            "error": f"{type(exc).__name__}: {exc}",
+            "stage": "policy-probe",
+        }
     finally:
         shutil.rmtree(probe, ignore_errors=True)
 
@@ -156,6 +172,7 @@ def _codex_workspace_policy_state(env: dict[str, str]) -> dict:
         "metrics_path": payload.get("metrics_path"),
         "expected_metrics_path": str(expected_metrics),
         "stderr": proc.stderr.strip()[-2000:],
+        "stage": "complete",
     }
 
 
