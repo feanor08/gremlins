@@ -281,6 +281,51 @@ def _python_neighbors(
     return neighbors[:limit]
 
 
+def _tracked_file_neighbors(
+    repo: Path,
+    seed_paths: Sequence[str],
+    config: Config,
+    limit: int = 8,
+) -> list[str]:
+    """Return tracked files literally referenced by already-relevant files."""
+    tracked = _tracked_paths(repo, config)
+    tracked_set = set(tracked)
+    basename_counts: dict[str, int] = defaultdict(int)
+    for path in tracked:
+        basename_counts[Path(path).name] += 1
+
+    neighbors: list[str] = []
+    for seed in seed_paths:
+        if seed not in tracked_set:
+            continue
+        try:
+            text = resolve_repo_file(repo, seed).read_text(
+                encoding="utf-8",
+                errors="replace",
+            )
+        except OSError:
+            continue
+
+        for candidate in tracked:
+            if candidate == seed or candidate in neighbors:
+                continue
+            basename = Path(candidate).name
+            full_literal = candidate in text
+            unique_basename_literal = (
+                basename_counts[basename] == 1
+                and re.search(
+                    rf"""["']{re.escape(basename)}["']""",
+                    text,
+                )
+                is not None
+            )
+            if full_literal or unique_basename_literal:
+                neighbors.append(candidate)
+                if len(neighbors) >= limit:
+                    return neighbors
+    return neighbors
+
+
 def _top_paths(
     repo: Path,
     evidence: list[Evidence],
@@ -343,7 +388,11 @@ def _top_paths(
     )
 
     source_seeds = [path for path in prelim if _path_role(path) == "source"][:5]
-    structural = set(_python_neighbors(repo, source_seeds, config, limit=10))
+    python_structural = set(_python_neighbors(repo, source_seeds, config, limit=10))
+    literal_structural = set(
+        _tracked_file_neighbors(repo, source_seeds, config, limit=8)
+    )
+    structural = python_structural | literal_structural
     for path in structural:
         if path not in candidates:
             candidates.append(path)
@@ -415,14 +464,21 @@ def _related_path_index(
         if item.kind == "search" and item.path and (repo / item.path).is_file():
             hits_by_path[item.path].append(item)
 
-    structural = set(
+    selected_sources = [
+        path for path in selected_paths if _path_role(path) == "source"
+    ][:6]
+    python_structural = set(
         _python_neighbors(
             repo,
-            [path for path in selected_paths if _path_role(path) == "source"][:6],
+            selected_sources,
             config,
             limit=12,
         )
     )
+    literal_structural = set(
+        _tracked_file_neighbors(repo, selected_sources, config, limit=10)
+    )
+    structural = python_structural | literal_structural
     tracked = _tracked_paths(repo, config)
 
     # Test/source filename affinity is cheap, deterministic, and was a common
