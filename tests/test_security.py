@@ -2,7 +2,7 @@ from pathlib import Path
 import subprocess
 import pytest
 
-from gremlins.config import Config, Limits, ProviderConfig, SecurityConfig
+from gremlins.config import Config, Limits, ProviderConfig, SecurityConfig, load_config
 from gremlins.security import PolicyError, resolve_repository, resolve_repo_file
 
 
@@ -54,3 +54,46 @@ def test_git_history_path_escape(tmp_path):
     subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
     with pytest.raises(PolicyError):
         git_history(repo, cfg(tmp_path), path="../outside")
+
+
+def test_project_root_is_implicitly_allowed_outside_home(tmp_path, monkeypatch):
+    root = tmp_path / "external-volume" / "gremlins"
+    root.mkdir(parents=True)
+    (root / "profiles").mkdir()
+    (root / "gremlins.toml").write_text(
+        """[provider]
+kind = "ollama"
+url = "http://127.0.0.1:11434"
+model = "x"
+
+[limits]
+max_task_chars = 4000
+max_evidence_chars = 48000
+max_result_evidence_chars = 8000
+max_file_chars = 16000
+max_search_matches = 80
+max_history_entries = 24
+max_model_output_tokens = 1200
+model_context_tokens = 16384
+model_timeout_seconds = 90
+command_timeout_seconds = 12
+
+[security]
+allowed_roots = ["~/only-home"]
+denied_paths = []
+require_git_repository = true
+allow_network_to = ["127.0.0.1"]
+""",
+        encoding="utf-8",
+    )
+    (root / "profiles" / "mac-local.toml").write_text(
+        'allowed_roots_extra = []\n',
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+
+    monkeypatch.setenv("GREMLINS_ROOT", str(root))
+    config = load_config()
+
+    assert root.resolve() in config.security.allowed_roots
+    assert resolve_repository(root, config) == root.resolve()
