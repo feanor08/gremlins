@@ -813,10 +813,12 @@ def build_arm_prompt(
             "The FIRST evidence_pack call must use detail='broad'. Then reason over the returned files, related_paths, relationships, and history. "
             "Every LATER evidence_pack call must use detail='focused' and must include at least one concrete paths, terms, or symbols value taken from the previous evidence. "
             "Do not make a second broad call. Focused follow-ups are intentionally compact. "
+            "Use at most two exploratory focused follow-ups. If you are still uncertain after those, reserve the fourth and final permitted Gremlins call for exact verification of the concrete path plus symbol or term you would otherwise Read/Grep/Glob directly. "
+            "For function-definition verification, pass the suspected function name in symbols when known, and prefer exact identifier or signature-like terms over another prose hypothesis. "
             "If a hypothesis or missing fact needs another lookup, ask a narrower question using those focused inputs. "
             "Prefer another focused evidence_pack over direct Read/Grep/Glob retrieval. "
             "Bash, web tools, and write/edit tools are unavailable in this arm. "
-            "Use direct Read/Grep/Glob only if the evidence packs still lack evidence required to answer correctly. "
+            "Use direct Read/Grep/Glob only if the final exact Gremlins verification still lacks evidence required to answer correctly. "
             "If you perform any direct repository evidence retrieval after using Gremlins, explicitly say FRONTIER_REDO_SEARCH=true at the end; otherwise say FRONTIER_REDO_SEARCH=false. "
             "The final answer must still be your own reasoning; Gremlins supplies evidence, not root-cause or architecture conclusions."
         )
