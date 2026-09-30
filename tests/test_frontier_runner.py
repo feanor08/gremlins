@@ -63,6 +63,22 @@ def test_parse_codex_stream_tracks_command_and_gremlins_calls():
     assert result.metadata["frontier_gremlins_tool_calls"] == 1
 
 
+def test_parse_codex_stream_classifies_wrapped_repo_search_but_not_skill_read():
+    stdout = "\n".join([
+        '{"type":"item.completed","item":{"type":"command_execution","command":"/bin/zsh -lc \\\"sed -n \'1,240p\' /Users/test/.codex/skills/gremlins-delegation/SKILL.md\\\""}}',
+        '{"type":"item.completed","item":{"type":"mcp_tool_call","server":"gremlins","tool":"evidence_pack"}}',
+        '{"type":"item.completed","item":{"type":"command_execution","command":"/bin/zsh -lc \\\"rg -n \'effective_terms\' src/gremlins/evidence_service.py\\\""}}',
+        '{"type":"item.completed","item":{"type":"mcp_tool_call","server":"gremlins","tool":"evidence_pack","error":"MCP tool call requires approval, but approval policy is never"}}',
+        '{"type":"item.completed","item":{"type":"agent_message","text":"done"}}',
+        '{"type":"turn.completed","usage":{"input_tokens":100,"cached_input_tokens":40,"output_tokens":20}}',
+    ])
+    result = _parse_codex_stream(stdout, 0, 1.0)
+    assert result.metadata["frontier_direct_tool_calls"] == 2
+    assert result.metadata["frontier_direct_evidence_calls"] == 1
+    assert result.metadata["frontier_gremlins_tool_calls"] == 2
+    assert len(result.metadata["permission_denials"]) == 1
+
+
 def test_invalid_frontier_run_is_rejected():
     parsed = _parse_claude_stream("", 2, 0.1)
     try:

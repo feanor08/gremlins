@@ -121,6 +121,54 @@ def test_analyze_trace_unwraps_claude_mcp_text_result(tmp_path: Path):
     assert row["redundant_post_gremlins_calls"] == 1
 
 
+def test_analyze_codex_trace_and_pair_codex_filename(tmp_path: Path):
+    analyzer = _load_analyzer()
+    import json
+
+    raw_dir = tmp_path / "raw"
+    raw_dir.mkdir()
+    trace = raw_dir / "20260930T120000Z-repo-003-C-codex.stdout.jsonl"
+    result_text = json.dumps({
+        "request": {"detail": "focused", "result_budget_chars": 3600},
+        "files": [{"path": "src/gremlins/evidence_service.py"}],
+    })
+    events = [
+        {
+            "type": "item.completed",
+            "item": {
+                "id": "g1",
+                "type": "mcp_tool_call",
+                "server": "gremlins",
+                "tool": "evidence_pack",
+                "arguments": {"task": "find selection", "detail": "focused"},
+                "result": {"content": [{"type": "text", "text": result_text}]},
+            },
+        },
+        {
+            "type": "item.completed",
+            "item": {
+                "id": "c1",
+                "type": "command_execution",
+                "command": "/bin/zsh -lc \"rg -n 'effective_terms' src/gremlins/evidence_service.py\"",
+            },
+        },
+        {"type": "turn.completed", "usage": {"input_tokens": 10, "output_tokens": 2}},
+    ]
+    trace.write_text("\n".join(json.dumps(event) for event in events) + "\n", encoding="utf-8")
+
+    rows = analyzer.pair_records_with_traces([
+        {"case_id": "repo-003", "arm": "C", "iteration": 1, "accepted": False}
+    ], raw_dir)
+    row = rows[0]
+    assert row.get("trace_missing") is not True
+    assert row["num_turns"] == 1
+    assert row["evidence_pack_calls"] == 1
+    assert row["evidence_pack_details"] == ["focused"]
+    assert row["returned_paths"] == ["src/gremlins/evidence_service.py"]
+    assert row["direct_evidence_calls"] == 1
+    assert row["direct_evidence_after_final_gremlins"] == 1
+
+
 def test_summarize_counts_runs_with_post_gremlins_verification():
     analyzer = _load_analyzer()
     summary = analyzer.summarize([
