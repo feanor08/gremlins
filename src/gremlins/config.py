@@ -75,10 +75,15 @@ def load_config(path: str | Path | None = None, profile: str | None = None) -> C
     l = data["limits"]
     s = data["security"]
 
-    allowed_roots = list(s["allowed_roots"])
-    for item in profile_data.get("allowed_roots_extra", []):
-        if item not in allowed_roots:
-            allowed_roots.append(item)
+    allowed_roots: list[Path] = []
+    for item in [
+        *s["allowed_roots"],
+        *profile_data.get("allowed_roots_extra", []),
+        str(root),
+    ]:
+        expanded = _expand(item)
+        if expanded not in allowed_roots:
+            allowed_roots.append(expanded)
 
     return Config(
         root=root,
@@ -90,7 +95,7 @@ def load_config(path: str | Path | None = None, profile: str | None = None) -> C
         ),
         limits=Limits(**l),
         security=SecurityConfig(
-            allowed_roots=tuple(_expand(x) for x in allowed_roots),
+            allowed_roots=tuple(allowed_roots),
             denied_paths=tuple(_expand(x) for x in s["denied_paths"]),
             require_git_repository=bool(s.get("require_git_repository", True)),
             allow_network_to=tuple(s.get("allow_network_to", ["127.0.0.1", "localhost"])),
