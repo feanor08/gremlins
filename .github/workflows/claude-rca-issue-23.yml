@@ -7,7 +7,6 @@ on:
 
 permissions:
   contents: read
-  issues: write
 
 jobs:
   rca:
@@ -41,7 +40,7 @@ jobs:
           PROMPT=$(cat <<'EOF'
 You are performing an independent root-cause analysis of a deterministic retrieval bug in this repository.
 
-Do not edit files. Do not propose a benchmark-specific hard-code. Inspect the checked-out repository yourself using only read/search tools.
+Do not edit files. Inspect the checked-out repository yourself using only read/search tools. Do not propose a benchmark-specific hard-code.
 
 Observed failing probe on this exact source SHA:
 
@@ -61,14 +60,14 @@ excerpt starts at:
 ...
 EFFECTIVE_TERMS_DEFINITION=FAIL
 
-The request was:
+Request:
 - focused path: src/gremlins/retrieval.py
 - terms: effective_search_terms ; def ; terms: list ; symbols: list
 - task: Find the function definition that chooses between orchestrator-supplied terms/symbols parameters and fallback keyword extraction to build effective_search_terms.
 
-Expected relevant definition is effective_terms(...) near the top of src/gremlins/retrieval.py.
+Expected relevant definition: effective_terms(...) near the top of src/gremlins/retrieval.py.
 
-Architecture constraints:
+Constraints:
 - evidence_pack is deterministic and model-free.
 - focused result budget remains <=3600 chars.
 - caller-focused paths must remain preserved.
@@ -76,33 +75,22 @@ Architecture constraints:
 - do not hard-code effective_terms or this benchmark case.
 - seek a general structural rule for Python function/class definition ranking.
 
-Produce a concise but rigorous Markdown RCA with these sections:
+Produce Markdown with:
 1. Root cause
-2. Why the current scorer ranks _fallback_terms_for_missed_phrases above effective_terms
-3. Smallest general fix you recommend
+2. Why current scoring ranks _fallback_terms_for_missed_phrases above effective_terms
+3. Smallest general fix
 4. Risks / counterexamples
-5. Exact regression tests to add
-6. Assessment of whether exact parameter-name hints from terms such as "terms: list" and "symbols: list" are a sound signal, and how strongly they should be weighted relative to exact symbol-name and loose body-token overlap
+5. Exact regression tests
+6. Whether exact parameter-name hints from "terms: list" / "symbols: list" are a sound signal and how they should be weighted relative to exact symbol-name and loose body-token overlap
 
-Cite concrete repository file paths, function names, and line ranges based on what you inspect. Do not make code changes.
+Cite concrete file paths, function names, and line ranges from the checked-out repository. Do not make code changes.
 EOF
 )
 
-          claude -p "$PROMPT"             --output-format text             --permission-mode dontAsk             --max-turns 12             --no-session-persistence             --allowedTools Read Grep Glob             --disallowedTools Bash WebSearch WebFetch Write Edit NotebookEdit Agent             > /tmp/claude-rca-23.md
+          claude -p "$PROMPT" --output-format text --permission-mode dontAsk --max-turns 12 --no-session-persistence --allowedTools Read Grep Glob --disallowedTools Bash WebSearch WebFetch Write Edit NotebookEdit Agent > "$RUNNER_TEMP/claude-rca-23.md"
 
           echo "===== CLAUDE RCA ====="
-          cat /tmp/claude-rca-23.md
-
-      - name: Post RCA to issue 23
-        if: always()
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          if [ -s /tmp/claude-rca-23.md ]; then
-            gh issue comment 23 --repo "${GITHUB_REPOSITORY}" --body-file /tmp/claude-rca-23.md
-          else
-            gh issue comment 23 --repo "${GITHUB_REPOSITORY}" --body "Claude RCA workflow did not produce an RCA artifact. Check workflow run logs."
-          fi
+          cat "$RUNNER_TEMP/claude-rca-23.md"
 
       - name: Upload RCA artifact
         if: always()
@@ -111,4 +99,4 @@ EOF
           name: claude-rca-issue-23-${{ github.run_id }}
           if-no-files-found: warn
           retention-days: 30
-          path: /tmp/claude-rca-23.md
+          path: ${{ runner.temp }}/claude-rca-23.md
