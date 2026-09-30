@@ -645,6 +645,34 @@ def _definition_intent(task: str, search_terms: Sequence[str]) -> bool:
     )
 
 
+def _definition_parameter_hints(task: str, search_terms: Sequence[str]) -> set[str]:
+    hints: set[str] = set()
+
+    # Focused callers often pass signature-like terms such as "terms: list"
+    # or "symbols: Sequence[str]". Preserve those exact parameter names rather
+    # than reducing them to the same loose tokens as "search_terms".
+    for value in search_terms:
+        match = re.match(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*:", value)
+        if match:
+            hints.add(match.group(1).lower())
+
+    # Also recognize natural task phrasing such as "terms/symbols parameters".
+    for match in re.finditer(
+        r"\b([A-Za-z_][A-Za-z0-9_]*)\s*/\s*([A-Za-z_][A-Za-z0-9_]*)\s+parameters?\b",
+        task,
+        re.IGNORECASE,
+    ):
+        hints.update({match.group(1).lower(), match.group(2).lower()})
+    for match in re.finditer(
+        r"\b([A-Za-z_][A-Za-z0-9_]*)\s+parameters?\b",
+        task,
+        re.IGNORECASE,
+    ):
+        hints.add(match.group(1).lower())
+
+    return hints
+
+
 def _python_definition_excerpt(
     repo: Path,
     path: str,
@@ -656,7 +684,8 @@ def _python_definition_excerpt(
         return None
 
     query_tokens = _definition_query_tokens(task, search_terms)
-    if not query_tokens:
+    parameter_hints = _definition_parameter_hints(task, search_terms)
+    if not query_tokens and not parameter_hints:
         return None
 
     try:
@@ -682,6 +711,7 @@ def _python_definition_excerpt(
         name_overlap = len(name_parts & query_tokens)
 
         param_parts: set[str] = set()
+        param_names: set[str] = set()
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             args = [
                 *node.args.posonlyargs,
@@ -693,8 +723,11 @@ def _python_definition_excerpt(
             if node.args.kwarg is not None:
                 args.append(node.args.kwarg)
             for arg in args:
+                param_names.add(arg.arg.lower())
                 param_parts.update(_identifier_parts(arg.arg))
         param_overlap = len(param_parts & query_tokens)
+        exact_param_matches = len(param_names & parameter_hints)
+        all_parameter_hints_match = bool(parameter_hints) and parameter_hints <= param_names
 
         start = max(1, int(getattr(node, "lineno", 1)))
         end = max(start, int(getattr(node, "end_lineno", start)))
@@ -710,9 +743,14 @@ def _python_definition_excerpt(
         ) else 0
         top_level_bonus = 5 if int(getattr(node, "col_offset", 0)) == 0 else 0
         score = (
-            (120 if exact_name else 0)
+            # Exact caller-supplied symbol names remain the strongest signal.
+            (240 if exact_name else 0)
             + (40 * name_overlap)
-            + (12 * param_overlap)
+            # Loose token overlap is useful but must not make search_terms look
+            # equivalent to an exact hinted parameter named terms.
+            + (10 * param_overlap)
+            + (70 * exact_param_matches)
+            + (35 if all_parameter_hints_match else 0)
             + (2 * body_overlap)
             + kind_bonus
             + top_level_bonus
