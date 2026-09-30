@@ -1,5 +1,6 @@
 from pathlib import Path
 import subprocess
+import pytest
 
 from gremlins.benchmark import (
     BenchmarkRecord,
