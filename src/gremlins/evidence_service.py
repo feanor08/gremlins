@@ -645,32 +645,65 @@ def _definition_intent(task: str, search_terms: Sequence[str]) -> bool:
     )
 
 
-def _definition_parameter_hints(task: str, search_terms: Sequence[str]) -> set[str]:
+def _definition_parameter_hints(search_terms: Sequence[str]) -> set[str]:
     hints: set[str] = set()
 
-    # Focused callers often pass signature-like terms such as "terms: list"
-    # or "symbols: Sequence[str]". Preserve those exact parameter names rather
-    # than reducing them to the same loose tokens as "search_terms".
+    # Preserve caller-explicit signature structure before generic tokenization.
+    # "terms: list" is stronger evidence for a parameter literally named
+    # "terms" than the loose "terms" token inside "search_terms".
     for value in search_terms:
         match = re.match(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*:", value)
         if match:
             hints.add(match.group(1).lower())
-
-    # Also recognize natural task phrasing such as "terms/symbols parameters".
-    for match in re.finditer(
-        r"\b([A-Za-z_][A-Za-z0-9_]*)\s*/\s*([A-Za-z_][A-Za-z0-9_]*)\s+parameters?\b",
-        task,
-        re.IGNORECASE,
-    ):
-        hints.update({match.group(1).lower(), match.group(2).lower()})
-    for match in re.finditer(
-        r"\b([A-Za-z_][A-Za-z0-9_]*)\s+parameters?\b",
-        task,
-        re.IGNORECASE,
-    ):
-        hints.add(match.group(1).lower())
-
     return hints
+
+
+def _definition_body_tokens(node: ast.AST) -> set[str]:
+    tokens: set[str] = set()
+
+    class BodyIdentifierVisitor(ast.NodeVisitor):
+        def visit_Name(self, child: ast.Name) -> None:
+            tokens.update(_identifier_parts(child.id))
+
+        def visit_Attribute(self, child: ast.Attribute) -> None:
+            tokens.update(_identifier_parts(child.attr))
+            self.visit(child.value)
+
+        def visit_keyword(self, child: ast.keyword) -> None:
+            if child.arg:
+                tokens.update(_identifier_parts(child.arg))
+            self.visit(child.value)
+
+        # Nested definitions are separate ranking candidates. Their signatures,
+        # docstrings, strings and bodies must not inflate the enclosing node.
+        def visit_FunctionDef(self, child: ast.FunctionDef) -> None:
+            return
+
+        def visit_AsyncFunctionDef(self, child: ast.AsyncFunctionDef) -> None:
+            return
+
+        def visit_ClassDef(self, child: ast.ClassDef) -> None:
+            return
+
+        def visit_Lambda(self, child: ast.Lambda) -> None:
+            return
+
+        # String literals/docstrings are prose, not structural code evidence.
+        def visit_Constant(self, child: ast.Constant) -> None:
+            return
+
+    visitor = BodyIdentifierVisitor()
+    for statement in getattr(node, "body", []):
+        # Skip the candidate's leading docstring explicitly. Other string
+        # literals are ignored by visit_Constant above.
+        if (
+            isinstance(statement, ast.Expr)
+            and isinstance(statement.value, ast.Constant)
+            and isinstance(statement.value.value, str)
+        ):
+            continue
+        visitor.visit(statement)
+    return tokens
 
 
 def _python_definition_excerpt(
@@ -684,7 +717,7 @@ def _python_definition_excerpt(
         return None
 
     query_tokens = _definition_query_tokens(task, search_terms)
-    parameter_hints = _definition_parameter_hints(task, search_terms)
+    parameter_hints = _definition_parameter_hints(search_terms)
     if not query_tokens and not parameter_hints:
         return None
 
@@ -731,8 +764,7 @@ def _python_definition_excerpt(
 
         start = max(1, int(getattr(node, "lineno", 1)))
         end = max(start, int(getattr(node, "end_lineno", start)))
-        body_text = "\n".join(lines[start - 1:min(end, start + 79)])
-        body_tokens = _identifier_parts(body_text)
+        body_tokens = _definition_body_tokens(node)
         body_overlap = min(len(body_tokens & query_tokens), 8)
 
         kind_bonus = 8 if (
@@ -743,14 +775,14 @@ def _python_definition_excerpt(
         ) else 0
         top_level_bonus = 5 if int(getattr(node, "col_offset", 0)) == 0 else 0
         score = (
-            # Exact caller-supplied symbol names remain the strongest signal.
-            (240 if exact_name else 0)
+            # Structural signal hierarchy:
+            # exact symbol > exact hinted parameter > loose name token >
+            # loose parameter token > executable-body token.
+            (160 if exact_name else 0)
             + (40 * name_overlap)
-            # Loose token overlap is useful but must not make search_terms look
-            # equivalent to an exact hinted parameter named terms.
-            + (10 * param_overlap)
-            + (70 * exact_param_matches)
-            + (35 if all_parameter_hints_match else 0)
+            + (12 * param_overlap)
+            + (55 * exact_param_matches)
+            + (25 if all_parameter_hints_match else 0)
             + (2 * body_overlap)
             + kind_bonus
             + top_level_bonus
