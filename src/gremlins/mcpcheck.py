@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 from pathlib import Path
 import sys
@@ -31,11 +32,53 @@ async def _check(command: str, args: list[str], env: dict[str, str] | None = Non
             tool_names = sorted(tool.name for tool in response.tools)
             missing = sorted(REQUIRED_TOOLS - set(tool_names))
             status_result = await session.call_tool("gremlins_status", arguments={})
+            evidence_result = await session.call_tool(
+                "evidence_pack",
+                arguments={
+                    "task": "Locate the evidence_pack MCP adapter implementation.",
+                    "repository": str(project_root()),
+                    "detail": "focused",
+                    "paths": ["src/gremlins/server.py"],
+                    "symbols": ["evidence_pack"],
+                    "include_history": False,
+                },
+            )
+            evidence_texts = [
+                part.text
+                for part in evidence_result.content
+                if getattr(part, "type", None) == "text" and isinstance(getattr(part, "text", None), str)
+            ]
+            evidence_text = "\n".join(evidence_texts)
+            try:
+                evidence_payload = json.loads(evidence_text)
+            except json.JSONDecodeError:
+                evidence_payload = {}
+            evidence_budget = int(
+                ((evidence_payload.get("request") or {}).get("result_budget_chars") or 0)
+            )
+            evidence_wire_chars = len(evidence_text)
+            structured = getattr(evidence_result, "structured_content", None)
+            evidence_wire_budget_ok = bool(
+                evidence_budget
+                and evidence_wire_chars <= evidence_budget
+                and structured == evidence_payload
+            )
+            status_error = bool(getattr(status_result, "isError", False))
+            evidence_error = bool(getattr(evidence_result, "isError", False))
             return {
-                "ok": not missing and not bool(getattr(status_result, "isError", False)),
+                "ok": (
+                    not missing
+                    and not status_error
+                    and not evidence_error
+                    and evidence_wire_budget_ok
+                ),
                 "tools": tool_names,
                 "missing_tools": missing,
-                "status_call_error": bool(getattr(status_result, "isError", False)),
+                "status_call_error": status_error,
+                "evidence_pack_call_error": evidence_error,
+                "evidence_pack_wire_chars": evidence_wire_chars,
+                "evidence_pack_wire_budget_chars": evidence_budget,
+                "evidence_pack_wire_budget_ok": evidence_wire_budget_ok,
             }
 
 
