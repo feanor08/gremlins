@@ -826,6 +826,9 @@ def _compact_pack(result: dict, max_chars: int) -> dict:
     def size() -> int:
         return len(json.dumps(result, ensure_ascii=False, separators=(",", ":")))
 
+    def is_focused(item: dict) -> bool:
+        return "caller-focused path" in (item.get("reasons") or [])
+
     while size() > max_chars:
         changed = False
         history = result.get("history", {})
@@ -843,25 +846,38 @@ def _compact_pack(result: dict, max_chars: int) -> dict:
             changed = True
         else:
             files = result.get("files", [])
-            # Drop low-ranked excerpts before deleting an entire evidence
-            # category. The top two file excerpts are retained longest.
-            for item in reversed(files[2:]):
-                if item.get("excerpt") is not None:
+
+            # Caller-focused files are explicit contract inputs. Under compact
+            # budgets, trim lower-value non-focused detail first, but never
+            # evict the focused file entry itself.
+            for item in reversed(files):
+                if not is_focused(item) and item.get("excerpt") is not None:
                     item["excerpt"] = None
                     changed = True
                     break
+
             if not changed:
                 for item in reversed(files):
-                    if len(item.get("hits") or []) > 1:
+                    if not is_focused(item) and len(item.get("hits") or []) > 1:
                         item["hits"].pop()
                         changed = True
                         break
+
             if not changed and len(result.get("relationships") or []) > 1:
                 result["relationships"].pop()
                 changed = True
-            if not changed and len(files) > 1:
-                files.pop()
+
+            if not changed and result.get("related_paths"):
+                result["related_paths"].pop()
                 changed = True
+
+            if not changed:
+                for index in range(len(files) - 1, -1, -1):
+                    if not is_focused(files[index]):
+                        files.pop(index)
+                        changed = True
+                        break
+
             # Only as a last resort may the final history group be removed.
             if not changed and topic:
                 topic.pop()
@@ -869,6 +885,33 @@ def _compact_pack(result: dict, max_chars: int) -> dict:
             if not changed and by_path:
                 by_path.pop()
                 changed = True
+
+            # If several caller-focused paths alone exceed the compact budget,
+            # keep every focused file entry but reduce secondary detail.
+            if not changed:
+                for item in reversed(files[1:]):
+                    if is_focused(item) and item.get("excerpt") is not None:
+                        item["excerpt"] = None
+                        changed = True
+                        break
+
+            if not changed:
+                for item in reversed(files):
+                    if is_focused(item) and item.get("hits"):
+                        item["hits"].pop()
+                        changed = True
+                        break
+
+            # Preserve the primary focused excerpt whenever possible. If the
+            # focused entry by itself is still too large, shrink only its text
+            # while keeping the definition anchor and file identity.
+            if not changed and files and is_focused(files[0]):
+                excerpt = files[0].get("excerpt")
+                text = excerpt.get("text") if isinstance(excerpt, dict) else None
+                if isinstance(text, str) and len(text) > 320:
+                    excerpt["text"] = text[: max(320, len(text) - 160)]
+                    excerpt["truncated"] = True
+                    changed = True
 
         if not changed:
             break
@@ -941,7 +984,13 @@ def evidence_pack(
         )
         for path in selected_paths
     ]
-    files.sort(key=lambda item: (-int(item["score"]), item["path"]))
+    files.sort(
+        key=lambda item: (
+            0 if "caller-focused path" in (item.get("reasons") or []) else 1,
+            -int(item["score"]),
+            item["path"],
+        )
+    )
 
     related_paths = _related_path_index(
         repo,
