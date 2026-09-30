@@ -208,3 +208,45 @@ def test_focused_python_pack_prefers_relevant_function_definition(tmp_path: Path
     assert entry["excerpt"] is not None
     assert "def effective_terms" in entry["excerpt"]["text"]
     assert len(json.dumps(result, separators=(",", ":"))) <= 3600
+
+
+def test_focused_compaction_never_evicts_caller_path(tmp_path: Path):
+    repo = _repo(tmp_path)
+
+    # Create several higher-scoring competitors so the caller-focused path is
+    # last by raw evidence score. The tight budget then exercises compaction.
+    for name in ("alpha", "beta", "gamma"):
+        (repo / "src" / f"{name}.py").write_text(
+            "\n".join([
+                "effective_search_terms = ['x']",
+                "effective_search_terms = ['y']",
+                "effective_search_terms = ['z']",
+            ]) + "\n",
+            encoding="utf-8",
+        )
+    subprocess.run(["git", "add", "."], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "add competing evidence"], cwd=repo, check=True)
+
+    config = _config_for(repo)
+    config = replace(
+        config,
+        limits=replace(config.limits, max_result_evidence_chars=1400),
+    )
+
+    result = evidence_pack(
+        str(repo),
+        "Find the exact caller-focused test path while competing search evidence exists.",
+        config,
+        detail="focused",
+        paths=["tests/test_provider.py"],
+        terms=["effective_search_terms"],
+        include_history=False,
+        max_files=4,
+    )
+
+    assert result["truncated"] is True
+    assert result["files"]
+    assert result["files"][0]["path"] == "tests/test_provider.py"
+    assert "caller-focused path" in result["files"][0]["reasons"]
+    assert any(item["path"] == "tests/test_provider.py" for item in result["files"])
+    assert len(json.dumps(result, separators=(",", ":"))) <= 1400
