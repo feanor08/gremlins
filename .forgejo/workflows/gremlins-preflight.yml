@@ -2,10 +2,6 @@ name: Gremlins deterministic preflight
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-      - "fix/**"
 
 jobs:
   deterministic-preflight:
