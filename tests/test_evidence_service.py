@@ -4,7 +4,8 @@ import json
 import subprocess
 
 from gremlins.config import load_config
-from gremlins.evidence_service import evidence_pack
+from gremlins.evidence_service import _focused_hit_context_excerpt, evidence_pack
+from gremlins.retrieval import Evidence
 
 
 def _config_for(repo: Path):
@@ -399,6 +400,52 @@ def test_focused_compaction_preserves_exact_hit_context_over_no_hit_focus_excerp
     exact_hit = by_path["tests/test_budget_terms.py"]
     assert 'terms = ["max_result_evidence_chars"]' in exact_hit["excerpt"]["text"]
     assert len(json.dumps(result, separators=(",", ":"))) <= 3600
+
+
+def test_exact_verification_keeps_preceding_setup_when_only_later_hit_is_returned(tmp_path: Path):
+    repo = _repo(tmp_path)
+    path = "tests/test_self_poison.py"
+    lines = [
+        "def test_budget_mapping():",
+        '    task = "Find the frontier-facing evidence size budget."',
+        '    terms = ["max_result_evidence_chars"]',
+        "    assert terms",
+        *[f"    padding_{index} = {index}" for index in range(10)],
+        '    verification = "identifier size_budget and all literal frontier-facing occurrences"',
+        "    assert verification",
+    ]
+    (repo / path).write_text("\n".join(lines) + "\n", encoding="utf-8")
+    subprocess.run(["git", "add", path], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "add self-poison fixture"], cwd=repo, check=True)
+
+    later_line = lines.index(
+        '    verification = "identifier size_budget and all literal frontier-facing occurrences"'
+    ) + 1
+    hit = Evidence(
+        id="search:self-poison",
+        kind="search",
+        path=path,
+        start_line=later_line,
+        end_line=later_line,
+        text=lines[later_line - 1],
+    )
+
+    excerpt = _focused_hit_context_excerpt(
+        repo,
+        path,
+        [hit],
+        (
+            "Exact verification: show the definition and value associated with "
+            "identifier size_budget and all literal frontier-facing occurrences."
+        ),
+        ["size_budget", "frontier-facing"],
+        _config_for(repo),
+    )
+
+    assert excerpt is not None
+    assert 'task = "Find the frontier-facing evidence size budget."' in excerpt.text
+    assert 'terms = ["max_result_evidence_chars"]' in excerpt.text
+    assert "verification =" in excerpt.text
 
 
 def test_focused_python_definition_prefers_exact_parameter_hints_over_fallback_helper(tmp_path: Path):
