@@ -1048,14 +1048,37 @@ def _compact_pack(result: dict, max_chars: int) -> dict:
         else:
             files = result.get("files", [])
 
+            # A caller can focus paths based on an earlier incomplete pack. If
+            # exact search discovers a better path, preserve that hit's nearby
+            # context before excerpts from focused paths that produced no hits.
+            # Keep every caller-focused file entry; only demote its no-hit
+            # excerpt when the compact budget forces a choice.
+            exact_hit_context_waiting = any(
+                not is_focused(item)
+                and item.get("hits")
+                and item.get("excerpt") is not None
+                for item in files
+            )
+            if exact_hit_context_waiting:
+                for item in reversed(files):
+                    if (
+                        is_focused(item)
+                        and not item.get("hits")
+                        and item.get("excerpt") is not None
+                    ):
+                        item["excerpt"] = None
+                        changed = True
+                        break
+
             # Caller-focused files are explicit contract inputs. Under compact
             # budgets, trim lower-value non-focused detail first, but never
             # evict the focused file entry itself.
-            for item in reversed(files):
-                if not is_focused(item) and item.get("excerpt") is not None:
-                    item["excerpt"] = None
-                    changed = True
-                    break
+            if not changed:
+                for item in reversed(files):
+                    if not is_focused(item) and item.get("excerpt") is not None:
+                        item["excerpt"] = None
+                        changed = True
+                        break
 
             if not changed:
                 for item in reversed(files):
