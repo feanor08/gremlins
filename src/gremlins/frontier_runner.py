@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
 import shutil
 import subprocess
 import time
@@ -421,6 +422,33 @@ _FRONTIER_READ_ONLY_BASH_RE = re.compile(
 )
 
 
+def _codex_command_payload(command: str) -> str:
+    """Return the command evaluated by a common shell ``-c`` wrapper."""
+    try:
+        argv = shlex.split(command)
+    except ValueError:
+        return command
+    if not argv:
+        return command
+    executable = Path(argv[0]).name
+    if executable not in {"sh", "bash", "zsh"}:
+        return command
+    for index, value in enumerate(argv[:-1]):
+        if value in {"-c", "-lc"}:
+            return argv[index + 1]
+    return command
+
+
+def _codex_command_is_direct_evidence(command: str) -> bool:
+    payload = _codex_command_payload(command)
+    # Codex may read an installed workflow skill even when the benchmark tries
+    # to disable it. That is treatment overhead, but it is not repository
+    # evidence and must not trigger the native-repository fail-fast control.
+    if "/.codex/skills/" in payload:
+        return False
+    return bool(_FRONTIER_READ_ONLY_BASH_RE.search(payload))
+
+
 def _is_gremlins_tool_name(name: str) -> bool:
     low = name.lower()
     return low.startswith("mcp__gremlins__") or low.startswith("gremlins.")
@@ -558,6 +586,7 @@ def _parse_codex_stream(stdout: str, returncode: int, elapsed_seconds: float) ->
     direct_evidence_calls = 0
     direct_tool_names: list[str] = []
     gremlins_tool_names: list[str] = []
+    permission_denials: list[str] = []
 
     for line in stdout.splitlines():
         try:
@@ -579,6 +608,11 @@ def _parse_codex_stream(stdout: str, returncode: int, elapsed_seconds: float) ->
         if not isinstance(item, dict):
             continue
         item_type = str(item.get("type") or "")
+        error = item.get("error")
+        if error is not None:
+            rendered_error = json.dumps(error, ensure_ascii=False) if not isinstance(error, str) else error
+            if re.search(r"permission|approval|denied", rendered_error, re.IGNORECASE):
+                permission_denials.append(rendered_error)
 
         if item_type == "agent_message":
             text = item.get("text")
@@ -601,7 +635,7 @@ def _parse_codex_stream(stdout: str, returncode: int, elapsed_seconds: float) ->
             command = str(item.get("command") or "")
             direct_tool_calls += 1
             direct_tool_names.append("command_execution")
-            if _FRONTIER_READ_ONLY_BASH_RE.search(command):
+            if _codex_command_is_direct_evidence(command):
                 direct_evidence_calls += 1
             continue
 
@@ -633,6 +667,7 @@ def _parse_codex_stream(stdout: str, returncode: int, elapsed_seconds: float) ->
             "frontier_gremlins_tool_calls": len(gremlins_tool_names),
             "frontier_direct_tool_names": direct_tool_names,
             "frontier_gremlins_tool_names": gremlins_tool_names,
+            "permission_denials": permission_denials,
         },
     )
 

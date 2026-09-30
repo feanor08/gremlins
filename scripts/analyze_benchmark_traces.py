@@ -6,6 +6,7 @@ from collections import Counter, defaultdict
 import json
 from pathlib import Path
 import re
+import shlex
 from statistics import median
 from typing import Any
 
@@ -44,6 +45,28 @@ def _tool_uses(events: list[dict]) -> list[dict]:
                 "name": block.get("name"),
                 "input": block.get("input") if isinstance(block.get("input"), dict) else {},
             })
+        if event.get("type") != "item.completed":
+            continue
+        item = event.get("item")
+        if not isinstance(item, dict):
+            continue
+        item_type = item.get("type")
+        if item_type == "mcp_tool_call":
+            server = str(item.get("server") or item.get("server_name") or "")
+            tool = str(item.get("tool") or item.get("name") or "")
+            uses.append({
+                "event_index": event_index,
+                "id": item.get("id"),
+                "name": f"mcp__{server}__{tool}".strip("_"),
+                "input": item.get("arguments") if isinstance(item.get("arguments"), dict) else {},
+            })
+        elif item_type == "command_execution":
+            uses.append({
+                "event_index": event_index,
+                "id": item.get("id"),
+                "name": "command_execution",
+                "input": {"command": str(item.get("command") or "")},
+            })
     return uses
 
 
@@ -73,6 +96,16 @@ def _tool_results(events: list[dict]) -> dict[str, str]:
             if not isinstance(tool_use_id, str):
                 continue
             out[tool_use_id] = _tool_result_text(block.get("content"))
+        if event.get("type") != "item.completed":
+            continue
+        item = event.get("item")
+        if not isinstance(item, dict) or item.get("type") != "mcp_tool_call":
+            continue
+        tool_use_id = item.get("id")
+        if isinstance(tool_use_id, str):
+            result = item.get("result")
+            if isinstance(result, dict) and isinstance(result.get("content"), list):
+                out[tool_use_id] = _tool_result_text(result["content"])
     return out
 
 
@@ -91,7 +124,30 @@ def _is_gremlins_use(use: dict) -> bool:
 
 
 def _is_direct_evidence_use(use: dict) -> bool:
-    return str(use.get("name") or "") in {"Read", "Grep", "Glob", "Search", "Find"}
+    name = str(use.get("name") or "")
+    if name in {"Read", "Grep", "Glob", "Search", "Find"}:
+        return True
+    if name != "command_execution":
+        return False
+    payload = use.get("input") if isinstance(use.get("input"), dict) else {}
+    command = str(payload.get("command") or "")
+    try:
+        argv = shlex.split(command)
+    except ValueError:
+        argv = []
+    if argv and Path(argv[0]).name in {"sh", "bash", "zsh"}:
+        for index, value in enumerate(argv[:-1]):
+            if value in {"-c", "-lc"}:
+                command = argv[index + 1]
+                break
+    if "/.codex/skills/" in command:
+        return False
+    return bool(re.search(
+        r"(?:^|[;&|()]\s*)(?:rg|grep|find|ls|cat|sed|head|tail|wc|tree)\b"
+        r"|(?:^|[;&|()]\s*)git\s+(?:log|show|blame|diff|status|grep|rev-parse)\b",
+        command,
+        re.IGNORECASE,
+    ))
 
 
 def _safe_json_object(text: str) -> dict | None:
@@ -160,7 +216,10 @@ def _direct_use_detail(use: dict, phase: str) -> dict:
 
 def analyze_trace(path: Path) -> dict:
     events = _json_lines(path)
-    final = next((e for e in reversed(events) if e.get("type") == "result"), {})
+    final = next(
+        (e for e in reversed(events) if e.get("type") in {"result", "turn.completed"}),
+        {},
+    )
     uses = _tool_uses(events)
     results = _tool_results(events)
 
@@ -225,6 +284,15 @@ def analyze_trace(path: Path) -> dict:
     denials = final.get("permission_denials")
     if not isinstance(denials, list):
         denials = []
+    for event in events:
+        if event.get("type") != "item.completed":
+            continue
+        item = event.get("item")
+        if not isinstance(item, dict) or item.get("error") is None:
+            continue
+        error = item["error"] if isinstance(item["error"], str) else json.dumps(item["error"], ensure_ascii=False)
+        if re.search(r"permission|approval|denied", error, re.IGNORECASE):
+            denials.append(error)
 
     usage = final.get("usage") if isinstance(final.get("usage"), dict) else {}
     total_gremlins_result_chars = sum(
@@ -241,7 +309,9 @@ def analyze_trace(path: Path) -> dict:
 
     return {
         "raw_file": str(path),
-        "num_turns": final.get("num_turns"),
+        "num_turns": final.get("num_turns") or sum(
+            event.get("type") == "turn.completed" for event in events
+        ),
         "terminal_subtype": final.get("subtype"),
         "terminal_reason": final.get("terminal_reason"),
         "tool_sequence": [use.get("name") for use in uses],
@@ -287,8 +357,11 @@ def pair_records_with_traces(records: list[dict], raw_dir: Path) -> list[dict]:
         values.sort(key=lambda row: str(row.get("recorded_at") or ""))
 
     grouped_raw: dict[tuple[str, str], list[Path]] = defaultdict(list)
-    for path in sorted(raw_dir.glob("*-claude.stdout.jsonl")):
-        match = re.match(r"^\d{8}T\d{6}Z-(.+)-([ABC])-claude\.stdout\.jsonl$", path.name)
+    for path in sorted(raw_dir.glob("*.stdout.jsonl")):
+        match = re.match(
+            r"^\d{8}T\d{6}Z-(.+)-([ABC])-(?:claude|codex)\.stdout\.jsonl$",
+            path.name,
+        )
         if not match:
             continue
         grouped_raw[(match.group(1), match.group(2))].append(path)
