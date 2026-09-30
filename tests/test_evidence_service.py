@@ -402,6 +402,81 @@ def test_focused_compaction_preserves_exact_hit_context_over_no_hit_focus_excerp
     assert len(json.dumps(result, separators=(",", ":"))) <= 3600
 
 
+def test_focused_named_config_paths_recover_task_terms_when_guessed_identifiers_miss(
+    tmp_path: Path,
+):
+    repo = _repo(tmp_path)
+    (repo / "gremlins.toml").write_text(
+        "\n".join([
+            "[limits]",
+            "max_evidence_chars = 48000",
+            "max_result_evidence_chars = 8000",
+            "max_file_chars = 16000",
+        ]) + "\n",
+        encoding="utf-8",
+    )
+    (repo / "src" / "config.py").write_text(
+        "\n".join([
+            "class Limits:",
+            "    max_task_chars: int",
+            "    max_evidence_chars: int",
+            "    max_result_evidence_chars: int",
+            "    max_file_chars: int",
+        ]) + "\n",
+        encoding="utf-8",
+    )
+    (repo / "src" / "evidence_service.py").write_text(
+        "\n".join([
+            "def evidence_pack(config, detail):",
+            "    result_budget = 3600 if detail == 'focused' else 8000",
+            "    return {'result_budget_chars': result_budget}",
+        ]) + "\n",
+        encoding="utf-8",
+    )
+    (repo / "tests" / "test_budget_words.py").write_text(
+        "\n".join([
+            "def test_frontier_budget_words():",
+            '    size_budget = "frontier-facing"',
+            "    assert size_budget",
+        ]) + "\n",
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "add", "."], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "add budget recovery fixture"], cwd=repo, check=True)
+
+    result = evidence_pack(
+        str(repo),
+        "Find the frontier-facing evidence size budget and configured default.",
+        _config_for(repo),
+        detail="focused",
+        paths=["gremlins.toml", "src/config.py", "src/evidence_service.py"],
+        terms=["size_budget", "frontier-facing"],
+        symbols=["size_budget"],
+        include_history=False,
+        include_tests=False,
+        max_files=4,
+    )
+
+    by_path = {item["path"]: item for item in result["files"]}
+    assert "gremlins.toml" in by_path
+    assert "src/config.py" in by_path
+    assert "src/evidence_service.py" in by_path
+
+    toml = by_path["gremlins.toml"]
+    config = by_path["src/config.py"]
+    assert "evidence" in [term.lower() for term in toml["recovery_terms"]]
+    assert "evidence" in [term.lower() for term in config["recovery_terms"]]
+    assert any(
+        "max_result_evidence_chars = 8000" in hit["text"]
+        for hit in toml["hits"]
+    )
+    assert any(
+        "max_result_evidence_chars" in hit["text"]
+        for hit in config["hits"]
+    )
+    assert len(json.dumps(result, separators=(",", ":"))) <= 3600
+
+
 def test_exact_verification_keeps_preceding_setup_when_only_later_hit_is_returned(tmp_path: Path):
     repo = _repo(tmp_path)
     path = "tests/test_self_poison.py"
