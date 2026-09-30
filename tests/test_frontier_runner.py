@@ -363,6 +363,8 @@ def test_codex_preflight_validates_exact_c_treatment_config(monkeypatch):
 
     def fake_run(args, **kwargs):
         captured.append((args, kwargs.get("env")))
+        if args[:3] == ["codex", "login", "status"]:
+            return SimpleNamespace(returncode=0, stdout="Logged in\n", stderr="")
         return SimpleNamespace(
             returncode=0,
             stdout="gremlins\n  enabled: true\n  enabled_tools: evidence_pack\n",
@@ -377,7 +379,10 @@ def test_codex_preflight_validates_exact_c_treatment_config(monkeypatch):
     monkeypatch.setattr(frontier_runner.subprocess, "run", fake_run)
     result = frontier_runner._codex_c_treatment_config_state()
     assert result["ok"] is True
-    command, env = captured[0]
+    assert result["auth_returncode"] == 0
+    assert result["auth_status"] == "Logged in"
+    assert captured[0] == (["codex", "login", "status"], isolated_env)
+    command, env = captured[1]
     assert env == isolated_env
     assert any(value.startswith("mcp_servers.gremlins.command=") for value in command)
     assert 'mcp_servers.gremlins.tools.evidence_pack.approval_mode="approve"' in command
