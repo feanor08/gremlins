@@ -2,9 +2,15 @@ name: Gremlins deterministic preflight
 
 on:
   workflow_dispatch:
+    inputs:
+      proof_id:
+        description: Unique generic-* proof identifier
+        required: true
+        type: string
 
 jobs:
   deterministic-preflight:
+    name: THG ARM64 proof ${{ inputs.proof_id }} sha=${{ forgejo.sha }}
     runs-on: thg-arm64-docker
     timeout-minutes: 20
     steps:
