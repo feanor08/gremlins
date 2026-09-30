@@ -974,6 +974,53 @@ def _focused_hit_context_excerpt(
     )
 
 
+def _focused_path_local_recovery_hits(
+    repo: Path,
+    path: str,
+    task: str,
+    search_terms: Sequence[str],
+    config: Config,
+    limit: int = 4,
+) -> tuple[list[Evidence], list[str]]:
+    """Recover context only inside an already caller-focused path.
+
+    Explicit focus terms remain authoritative for repository-wide discovery.
+    When those terms miss inside a path the caller already selected, use a few
+    task-derived literals locally so the path does not collapse into an empty
+    stub merely because the caller guessed the identifier differently.
+    """
+    explicit = {term.strip().lower() for term in search_terms if term.strip()}
+    candidates: list[str] = []
+    for raw in candidate_terms(task):
+        term = raw.strip().strip(".,:;!?()[]{}")
+        if len(term) < 3 or term.lower() in explicit:
+            continue
+        if term.lower() in _STOP_WORDS:
+            continue
+        if term.lower() not in {value.lower() for value in candidates}:
+            candidates.append(term)
+        if len(candidates) >= 6:
+            break
+
+    recovered: list[Evidence] = []
+    matched_terms: list[str] = []
+    seen: set[tuple[int | None, str]] = set()
+    for term in candidates:
+        hits = literal_search(repo, term, config, scope=path)
+        if not hits:
+            continue
+        matched_terms.append(term)
+        for hit in hits:
+            key = (hit.start_line, hit.text)
+            if key in seen:
+                continue
+            seen.add(key)
+            recovered.append(hit)
+            if len(recovered) >= limit:
+                return recovered, matched_terms
+    return recovered, matched_terms
+
+
 def _file_entry(
     repo: Path,
     path: str,
@@ -984,6 +1031,16 @@ def _file_entry(
     task: str,
 ) -> dict:
     all_hits = [item for item in evidence if item.kind == "search" and item.path == path]
+    recovery_terms: list[str] = []
+    if focused and not all_hits:
+        recovered_hits, recovery_terms = _focused_path_local_recovery_hits(
+            repo,
+            path,
+            task,
+            search_terms,
+            config,
+        )
+        all_hits = recovered_hits
     hits = all_hits[:4 if focused else 3]
     excerpt = next(
         (item for item in evidence if item.kind == "file" and item.path == path),
@@ -1029,9 +1086,15 @@ def _file_entry(
             (["caller-focused path"] if focused else [])
             + (["focused hit context"] if hit_context_excerpt is not None else [])
             + (["focused symbol definition"] if definition_excerpt is not None else [])
+            + (
+                [f"path-local task recovery: {', '.join(recovery_terms[:2])}"]
+                if recovery_terms
+                else []
+            )
             + ([f"matched {len(set(matched))} query term(s)"] if matched else ["path/name relevance"])
         ),
         "matched_terms": matched[:8],
+        "recovery_terms": recovery_terms[:4],
         "hits": [
             {"line": item.start_line, "text": item.text[:260]}
             for item in hits
