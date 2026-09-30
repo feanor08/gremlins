@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 import os
 
 from mcp.server import MCPServer
+from mcp.types import CallToolResult, TextContent
 
 from .config import load_config
 from .provider import ProviderError, health
@@ -70,6 +72,14 @@ def git_history(repository: str = ".", path: str | None = None, query: str | Non
     return {"snapshot": snapshot(repo, config), "history": [x.as_dict() for x in items]}
 
 
+def _evidence_pack_mcp_result(result: dict) -> CallToolResult:
+    text = json.dumps(result, ensure_ascii=False, separators=(",", ":"))
+    return CallToolResult(
+        content=[TextContent(type="text", text=text)],
+        structured_content=result,
+    )
+
+
 @mcp.tool()
 def evidence_pack(
     task: str,
@@ -83,13 +93,16 @@ def evidence_pack(
     max_files: int = 6,
     detail: str = "auto",
     measurement_tag: str | None = None,
-) -> dict:
+) -> CallToolResult:
     """Deterministic evidence bundle for multi-hop investigation.
 
     Use detail=broad for the first discovery pass. Use detail=focused with at
     least one path/term/symbol for compact follow-up evidence during reasoning.
+
+    The MCP adapter emits compact JSON text for model-facing clients while
+    preserving the same dict in structured_content for programmatic callers.
     """
-    return _evidence_pack(
+    result = _evidence_pack(
         repository,
         task,
         load_config(),
@@ -103,6 +116,7 @@ def evidence_pack(
         detail=detail,
         measurement_tag=_effective_measurement_tag(measurement_tag),
     )
+    return _evidence_pack_mcp_result(result)
 
 
 @mcp.tool()
