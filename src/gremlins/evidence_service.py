@@ -1038,12 +1038,13 @@ def _focused_path_local_recovery_hits(
     config: Config,
     limit: int = 4,
 ) -> tuple[list[Evidence], list[str]]:
-    """Recover context only inside an already caller-focused path.
+    """Recover task context only inside an already bounded path.
 
     Explicit focus terms remain authoritative for repository-wide discovery.
-    When those terms miss inside a path the caller already selected, use a few
-    task-derived literals locally so the path does not collapse into an empty
-    stub merely because the caller guessed the identifier differently.
+    When those terms miss inside a path already bounded by caller focus or a
+    literal tracked-file relationship, use a few task-derived literals locally
+    so the path does not collapse into an empty stub merely because the caller
+    guessed the identifier differently. This never broadens repository search.
     """
     explicit = {term.strip().lower() for term in search_terms if term.strip()}
     candidates: list[str] = []
@@ -1085,10 +1086,12 @@ def _file_entry(
     config: Config,
     focused: bool,
     task: str,
+    literal_companion: bool = False,
 ) -> dict:
     all_hits = [item for item in evidence if item.kind == "search" and item.path == path]
     recovery_terms: list[str] = []
-    if focused and not all_hits:
+    local_recovery = focused or literal_companion
+    if local_recovery and not all_hits:
         recovered_hits, recovery_terms = _focused_path_local_recovery_hits(
             repo,
             path,
@@ -1097,7 +1100,7 @@ def _file_entry(
             config,
         )
         all_hits = recovered_hits
-    hits = all_hits[:4 if focused else 3]
+    hits = all_hits[:4 if local_recovery else 3]
     excerpt = next(
         (item for item in evidence if item.kind == "file" and item.path == path),
         None,
@@ -1133,13 +1136,19 @@ def _file_entry(
             excerpt = None
 
     matched = _search_terms_for_path(path, hits, search_terms)
-    score = len(set(term.lower() for term in matched)) * 10 + len(hits) * 2 + (6 if focused else 0)
+    score = (
+        len(set(term.lower() for term in matched)) * 10
+        + len(hits) * 2
+        + (6 if focused else 0)
+        + (3 if literal_companion else 0)
+    )
     entry = {
         "path": path,
         "role": _path_role(path),
         "score": score,
         "reasons": (
             (["caller-focused path"] if focused else [])
+            + (["literal tracked-file companion"] if literal_companion else [])
             + (["focused hit context"] if hit_context_excerpt is not None else [])
             + (["focused symbol definition"] if definition_excerpt is not None else [])
             + (
@@ -1369,6 +1378,18 @@ def evidence_pack(
         str(resolve_repo_file(repo, path).relative_to(repo))
         for path in (paths or [])
     }
+    literal_companions = set(
+        _tracked_file_neighbors(
+            repo,
+            [
+                path
+                for path in selected_paths
+                if _path_role(path) == "source"
+            ],
+            config,
+            limit=8,
+        )
+    )
 
     files = [
         _file_entry(
@@ -1379,6 +1400,7 @@ def evidence_pack(
             config,
             focused=path in focused,
             task=task,
+            literal_companion=path in literal_companions,
         )
         for path in selected_paths
     ]
