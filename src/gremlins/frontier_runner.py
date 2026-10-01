@@ -9,6 +9,7 @@ import re
 import shlex
 import shutil
 import subprocess
+import sys
 import time
 from typing import Any
 import uuid
@@ -31,17 +32,148 @@ from .benchmark import (
 )
 
 
-_CODEX_C_MCP_OVERRIDES = (
-    "mcp_servers.gremlins.enabled=true",
-    'mcp_servers.gremlins.enabled_tools=["evidence_pack"]',
-    'mcp_servers.gremlins.tools.evidence_pack.approval_mode="approve"',
-    'mcp_servers.gremlins.env_vars=["GREMLINS_MEASUREMENT_TAG"]',
-)
+def _codex_mcp_command_override() -> str:
+    wrapper = Path("~/.local/bin/gremlins-mcp").expanduser()
+    return f"mcp_servers.gremlins.command={json.dumps(str(wrapper))}"
 
 
-def _codex_gremlins_skill_override() -> str:
-    skill = Path("~/.codex/skills/gremlins-delegation").expanduser()
-    return f"skills.config=[{{path={json.dumps(str(skill))},enabled=false}}]"
+def _codex_c_mcp_overrides() -> tuple[str, ...]:
+    return (
+        _codex_mcp_command_override(),
+        "mcp_servers.gremlins.enabled=true",
+        'mcp_servers.gremlins.enabled_tools=["evidence_pack"]',
+        'mcp_servers.gremlins.tools.evidence_pack.approval_mode="approve"',
+        'mcp_servers.gremlins.env_vars=["GREMLINS_MEASUREMENT_TAG","GREMLINS_STATE_DIR"]',
+    )
+
+
+def _codex_benchmark_env() -> dict[str, str]:
+    """Run controlled Codex children without user-level instructions or skills."""
+    env = os.environ.copy()
+    real_codex_home = Path(
+        os.environ.get("CODEX_HOME") or str(Path.home() / ".codex")
+    ).expanduser().resolve()
+    bench_root = benchmark_root()
+    state_dir = bench_root.parent.resolve()
+    isolated_home = bench_root / "codex-isolated-home"
+
+    # The suite is sequential. Rebuild the treatment home for every controlled
+    # child so a prior Codex process cannot leave instructions, skills, plugins,
+    # or config state that contaminates a later arm.
+    if isolated_home.exists():
+        shutil.rmtree(isolated_home)
+    isolated_codex_home = isolated_home / ".codex"
+    isolated_codex_home.mkdir(parents=True, exist_ok=True)
+
+    # ChatGPT-plan auth may be stored in CODEX_HOME/auth.json. Expose only that
+    # credential file when present; keyring-backed logins need no copied state.
+    source_auth = real_codex_home / "auth.json"
+    if source_auth.is_file():
+        target_auth = isolated_codex_home / "auth.json"
+        try:
+            target_auth.symlink_to(source_auth)
+        except OSError:
+            shutil.copy2(source_auth, target_auth)
+            target_auth.chmod(0o600)
+
+    env["HOME"] = str(isolated_home)
+    env["CODEX_HOME"] = str(isolated_codex_home)
+    # Keep Gremlins telemetry/workspaces in the canonical outer state tree even
+    # though Codex itself receives an isolated HOME. The MCP server receives
+    # this explicit variable through the treatment config.
+    env["GREMLINS_STATE_DIR"] = str(state_dir)
+    return env
+
+
+def _codex_workspace_policy_state(env: dict[str, str]) -> dict:
+    """Zero-frontier probe of the exact isolated-HOME workspace policy."""
+    state_dir = Path(env["GREMLINS_STATE_DIR"]).expanduser().resolve()
+    probe = state_dir / "benchmarks" / "codex-policy-preflight"
+    if probe.exists():
+        shutil.rmtree(probe)
+    probe.mkdir(parents=True, exist_ok=True)
+
+    try:
+        git_init = subprocess.run(
+            ["git", "init", "-q"],
+            cwd=str(probe),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=15,
+            check=False,
+            env=env,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        shutil.rmtree(probe, ignore_errors=True)
+        return {
+            "ok": False,
+            "error": f"{type(exc).__name__}: {exc}",
+            "stage": "git-init",
+        }
+
+    if git_init.returncode != 0:
+        shutil.rmtree(probe, ignore_errors=True)
+        return {
+            "ok": False,
+            "error": "failed to initialize isolated-policy probe repository",
+            "stderr": git_init.stderr.strip()[-2000:],
+            "stage": "git-init",
+        }
+
+    probe_env = env.copy()
+    probe_env["GREMLINS_ROOT"] = str(project_root())
+    script = (
+        "import json,sys;"
+        "from gremlins.config import load_config;"
+        "from gremlins.metrics import metrics_path;"
+        "from gremlins.security import resolve_repository;"
+        "repo=resolve_repository(sys.argv[1],load_config());"
+        "print(json.dumps({'repository':str(repo),'metrics_path':str(metrics_path())}))"
+    )
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-c", script, str(probe)],
+            cwd=str(project_root()),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=20,
+            check=False,
+            env=probe_env,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return {
+            "ok": False,
+            "error": f"{type(exc).__name__}: {exc}",
+            "stage": "policy-probe",
+        }
+    finally:
+        shutil.rmtree(probe, ignore_errors=True)
+
+    payload: dict[str, str] = {}
+    if proc.returncode == 0:
+        try:
+            loaded = json.loads(proc.stdout.strip().splitlines()[-1])
+            if isinstance(loaded, dict):
+                payload = {str(k): str(v) for k, v in loaded.items()}
+        except (json.JSONDecodeError, IndexError):
+            payload = {}
+
+    expected_metrics = state_dir / "jobs.jsonl"
+    return {
+        "ok": (
+            proc.returncode == 0
+            and payload.get("repository") == str(probe.resolve())
+            and payload.get("metrics_path") == str(expected_metrics)
+        ),
+        "returncode": proc.returncode,
+        "repository": payload.get("repository"),
+        "metrics_path": payload.get("metrics_path"),
+        "expected_metrics_path": str(expected_metrics),
+        "stderr": proc.stderr.strip()[-2000:],
+        "stage": "complete",
+    }
 
 
 @dataclass(frozen=True)
@@ -139,11 +271,21 @@ def _mcp_registration_state(client: str) -> dict:
 
 def _codex_c_treatment_config_state() -> dict:
     args = ["codex"]
-    for override in _CODEX_C_MCP_OVERRIDES:
+    overrides = _codex_c_mcp_overrides()
+    for override in overrides:
         args.extend(["-c", override])
-    args.extend(["-c", _codex_gremlins_skill_override()])
     args.extend(["mcp", "get", "gremlins"])
+    env = _codex_benchmark_env()
     try:
+        auth_proc = subprocess.run(
+            ["codex", "login", "status"],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=15,
+            check=False,
+            env=env,
+        )
         proc = subprocess.run(
             args,
             text=True,
@@ -151,20 +293,31 @@ def _codex_c_treatment_config_state() -> dict:
             stderr=subprocess.PIPE,
             timeout=15,
             check=False,
+            env=env,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
     stdout = proc.stdout.strip()
+    auth_detail = (auth_proc.stdout.strip() or auth_proc.stderr.strip())[-2000:]
+    workspace_policy = _codex_workspace_policy_state(env)
     return {
         "ok": (
-            proc.returncode == 0
+            auth_proc.returncode == 0
+            and proc.returncode == 0
             and "enabled: true" in stdout
             and "enabled_tools: evidence_pack" in stdout
+            and bool(workspace_policy.get("ok"))
         ),
         "returncode": proc.returncode,
         "stdout": stdout[-2000:],
         "stderr": proc.stderr.strip()[-2000:],
-        "overrides": list(_CODEX_C_MCP_OVERRIDES),
+        "auth_returncode": auth_proc.returncode,
+        "auth_status": auth_detail,
+        "overrides": list(overrides),
+        "isolated_home": env.get("HOME"),
+        "isolated_codex_home": env.get("CODEX_HOME"),
+        "gremlins_state_dir": env.get("GREMLINS_STATE_DIR"),
+        "workspace_policy": workspace_policy,
     }
 
 
@@ -200,11 +353,18 @@ def frontier_preflight(repository: str | Path, client: str) -> dict:
         "error": f"wrapper missing: {wrapper}",
     }
     module_smoke = check_python_module()
-    registration = _mcp_registration_state(client)
     codex_c_treatment_config = (
         _codex_c_treatment_config_state()
         if client == "codex"
         else {"ok": True, "not_applicable": True}
+    )
+    # Codex treatment children use a fresh isolated HOME/CODEX_HOME and inject
+    # the Gremlins stdio command explicitly, so the user's global registration
+    # is intentionally not part of the controlled benchmark surface.
+    registration = (
+        codex_c_treatment_config
+        if client == "codex"
+        else _mcp_registration_state(client)
     )
     evidence_pack_present = "evidence_pack" in (wrapper_smoke.get("tools") or [])
 
@@ -748,17 +908,17 @@ def _codex_command(
 ) -> list[str]:
     args = ["codex", "-c", 'approval_policy="never"']
     if not allow_agents:
-        args.extend([
-            "-c",
-            "agents.enabled=false",
-            "-c",
-            _codex_gremlins_skill_override(),
-        ])
+        args.extend(["-c", "agents.enabled=false"])
 
     if gremlins_mode == "disabled":
-        args.extend(["-c", "mcp_servers.gremlins.enabled=false"])
+        args.extend([
+            "-c",
+            _codex_mcp_command_override(),
+            "-c",
+            "mcp_servers.gremlins.enabled=false",
+        ])
     elif gremlins_mode == "evidence-pack-only":
-        for override in _CODEX_C_MCP_OVERRIDES:
+        for override in _codex_c_mcp_overrides():
             args.extend(["-c", override])
     elif gremlins_mode is not None:
         raise ValueError("gremlins_mode must be disabled, evidence-pack-only, or None")
@@ -880,6 +1040,8 @@ def _ensure_study_provenance(
         "include_a": include_a,
         "claude_tool_search": "disabled-preload" if client == "claude" else None,
         "claude_ai_mcp_servers": False if client == "claude" else None,
+        "codex_treatment_home": "isolated-v1" if client == "codex" else None,
+        "codex_state_dir_mode": "explicit-shared-v1" if client == "codex" else None,
     }
     assert_study_compatible(study, payload)
     write_study_metadata(study, payload)
@@ -982,6 +1144,8 @@ def run_frontier_case(
     run_env = None
     if client == "claude" and arm in {"B", "C"}:
         run_env = _claude_benchmark_env()
+    elif client == "codex" and arm in {"B", "C"}:
+        run_env = _codex_benchmark_env()
     if arm == "C" and unique_tag:
         if run_env is None:
             run_env = os.environ.copy()
@@ -1304,6 +1468,8 @@ def run_frontier_suite(
         "ordering": "counterbalanced B/C by case index + iteration parity",
         "claude_tool_search": "disabled-preload" if client == "claude" else None,
         "claude_ai_mcp_servers": False if client == "claude" else None,
+        "codex_treatment_home": "isolated-v1" if client == "codex" else None,
+        "codex_state_dir_mode": "explicit-shared-v1" if client == "codex" else None,
     }
     assert_study_compatible(study, study_metadata)
     metadata_path = write_study_metadata(study, study_metadata)

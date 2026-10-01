@@ -34,6 +34,29 @@ def test_literal_search_and_read(tmp_path):
     assert "RuntimeError" in excerpt.text
 
 
+def test_literal_search_single_file_scope_preserves_path(tmp_path):
+    repo = make_repo(tmp_path)
+    target = repo / "budget.toml"
+    target.write_text(
+        "[limits]\nmax_result_evidence_chars = 8000\n",
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "add", "budget.toml"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "add scoped literal fixture"], cwd=repo, check=True)
+
+    hits = literal_search(
+        repo,
+        "max_result_evidence_chars",
+        load_config(),
+        scope="budget.toml",
+    )
+
+    assert hits
+    assert hits[0].path == "budget.toml"
+    assert hits[0].start_line == 2
+    assert "max_result_evidence_chars = 8000" in hits[0].text
+
+
 def test_history(tmp_path):
     repo = make_repo(tmp_path)
     cfg = load_config()

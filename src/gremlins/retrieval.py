@@ -128,6 +128,7 @@ def literal_search(repo: Path, query: str, config: Config, scope: str = ".") -> 
             [
                 "rg",
                 "--line-number",
+                "--with-filename",
                 "--no-heading",
                 "--color",
                 "never",

@@ -70,6 +70,8 @@ def assert_study_compatible(study: str, payload: dict) -> None:
         "include_a",
         "claude_tool_search",
         "claude_ai_mcp_servers",
+        "codex_treatment_home",
+        "codex_state_dir_mode",
     )
     mismatches = {
         key: {"existing": existing.get(key), "requested": payload.get(key)}
