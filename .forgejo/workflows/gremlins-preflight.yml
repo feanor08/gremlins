@@ -14,11 +14,11 @@ jobs:
     runs-on: thg-arm64-docker
     timeout-minutes: 20
     steps:
-      - name: Check out exact Forgejo SHA
+      - uses: actions/checkout@v4
+
+      - name: Verify exact Forgejo SHA
         run: |
           set -euo pipefail
-          git clone "$FORGEJO_SERVER_URL/${GITHUB_REPOSITORY}.git" .
-          git checkout "$GITHUB_SHA"
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
 
       - name: Install deterministic test runtime
