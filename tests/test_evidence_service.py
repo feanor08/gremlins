@@ -94,6 +94,52 @@ def test_tracked_file_neighbors_follow_unique_literal_config_reference(tmp_path:
     assert "gremlins.toml" in neighbors
 
 
+def test_focused_tracked_file_companion_recovers_local_task_hits(tmp_path: Path):
+    repo = _repo(tmp_path)
+    nested = repo / "src" / "gremlins"
+    nested.mkdir()
+    (nested / "config.py").write_text(
+        'def load_config(root):\n    return root / "gremlins.toml"\n',
+        encoding="utf-8",
+    )
+    (repo / "gremlins.toml").write_text(
+        "[limits]\n"
+        "max_evidence_chars = 48000\n"
+        "max_result_evidence_chars = 8000\n"
+        "max_file_chars = 16000\n",
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "add", "."], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "commit", "-qm", "add literal config companion"],
+        cwd=repo,
+        check=True,
+    )
+
+    result = evidence_pack(
+        str(repo),
+        "Find the frontier-facing evidence size budget.",
+        _config_for(repo),
+        detail="focused",
+        paths=["src/gremlins/config.py"],
+        terms=["size_budget", "frontier-facing"],
+        symbols=["size_budget"],
+        include_history=False,
+        include_tests=False,
+        max_files=4,
+    )
+
+    assert result["discovery"]["terms"] == ["size_budget", "frontier-facing"]
+    by_path = {item["path"]: item for item in result["files"]}
+    toml = by_path["gremlins.toml"]
+    assert "literal tracked-file companion" in toml["reasons"]
+    assert any(
+        "max_result_evidence_chars = 8000" in hit["text"]
+        for hit in toml["hits"]
+    )
+    assert len(json.dumps(result, separators=(",", ":"))) <= 3600
+
+
 def test_evidence_pack_focus_path_is_preserved(tmp_path: Path):
     repo = _repo(tmp_path)
     result = evidence_pack(
