@@ -4,7 +4,8 @@ import json
 import subprocess
 
 from gremlins.config import load_config
-from gremlins.evidence_service import evidence_pack
+from gremlins.evidence_service import _focused_hit_context_excerpt, _tracked_file_neighbors, evidence_pack
+from gremlins.retrieval import Evidence
 
 
 def _config_for(repo: Path):
@@ -66,6 +67,77 @@ def test_evidence_pack_fuzzy_discovery_relationships_and_history(tmp_path: Path)
     )
     assert any(item["path"] == "src/provider.py" for item in result["history"]["by_path"])
     assert len(json.dumps(result, separators=(",", ":"))) <= _config_for(repo).limits.max_result_evidence_chars
+
+
+def test_tracked_file_neighbors_follow_unique_literal_config_reference(tmp_path: Path):
+    repo = _repo(tmp_path)
+    nested = repo / "src" / "gremlins"
+    nested.mkdir()
+    source = nested / "config.py"
+    source.write_text(
+        'def load_config(root):\n    return root / "gremlins.toml"\n',
+        encoding="utf-8",
+    )
+    (repo / "gremlins.toml").write_text(
+        "[limits]\nmax_result_evidence_chars = 8000\n",
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "add", "."], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "add tracked config reference"], cwd=repo, check=True)
+
+    neighbors = _tracked_file_neighbors(
+        repo,
+        ["src/gremlins/config.py"],
+        _config_for(repo),
+    )
+
+    assert "gremlins.toml" in neighbors
+
+
+def test_focused_tracked_file_companion_recovers_local_task_hits(tmp_path: Path):
+    repo = _repo(tmp_path)
+    nested = repo / "src" / "gremlins"
+    nested.mkdir()
+    (nested / "config.py").write_text(
+        'def load_config(root):\n    return root / "gremlins.toml"\n',
+        encoding="utf-8",
+    )
+    (repo / "gremlins.toml").write_text(
+        "[limits]\n"
+        "max_evidence_chars = 48000\n"
+        "max_result_evidence_chars = 8000\n"
+        "max_file_chars = 16000\n",
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "add", "."], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "commit", "-qm", "add literal config companion"],
+        cwd=repo,
+        check=True,
+    )
+
+    result = evidence_pack(
+        str(repo),
+        "Find the frontier-facing evidence size budget.",
+        _config_for(repo),
+        detail="focused",
+        paths=["src/gremlins/config.py"],
+        terms=["size_budget", "frontier-facing"],
+        symbols=["size_budget"],
+        include_history=False,
+        include_tests=False,
+        max_files=4,
+    )
+
+    assert result["discovery"]["terms"] == ["size_budget", "frontier-facing"]
+    by_path = {item["path"]: item for item in result["files"]}
+    toml = by_path["gremlins.toml"]
+    assert "literal tracked-file companion" in toml["reasons"]
+    assert any(
+        "max_result_evidence_chars = 8000" in hit["text"]
+        for hit in toml["hits"]
+    )
+    assert len(json.dumps(result, separators=(",", ":"))) <= 3600
 
 
 def test_evidence_pack_focus_path_is_preserved(tmp_path: Path):
@@ -259,6 +331,58 @@ def test_focused_handler_request_returns_multiple_exact_hit_regions(tmp_path: Pa
     assert len(json.dumps(result, separators=(",", ":"))) <= 3600
 
 
+def test_exact_verification_prefers_enclosing_function_around_literal_hit(tmp_path: Path):
+    repo = _repo(tmp_path)
+    service = repo / "src" / "evidence_service.py"
+    service.write_text(
+        "\n".join([
+            "from retrieval import effective_terms",
+            "",
+            "def _discovery_terms(task, terms=None, symbols=None):",
+            "    explicit = bool(terms or symbols)",
+            "    base = effective_terms(task, terms=terms, symbols=symbols)",
+            "    if explicit:",
+            "        return base, []",
+            "    fallback = [word for word in task.split() if len(word) > 3]",
+            "    return base, fallback",
+            "",
+            *[f"padding_{index} = {index}" for index in range(30)],
+            "",
+            "def evidence_pack(repository, task, terms=None, symbols=None):",
+            "    search_terms, fallback_terms = _discovery_terms(task, terms, symbols)",
+            "    return search_terms + fallback_terms",
+        ]) + "\n",
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "add", "src/evidence_service.py"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "add discovery-term fixture"], cwd=repo, check=True)
+
+    result = evidence_pack(
+        str(repo),
+        (
+            "Exact final verification: show the evidence_pack selection implementation "
+            "and the expressions terms or, symbols or, and fallback extraction."
+        ),
+        _config_for(repo),
+        detail="focused",
+        paths=["src/evidence_service.py"],
+        terms=["terms or", "symbols or", "fallback extraction"],
+        symbols=["evidence_pack"],
+        include_history=False,
+        include_tests=False,
+        max_files=1,
+    )
+
+    entry = next(item for item in result["files"] if item["path"] == "src/evidence_service.py")
+    excerpt = (entry.get("excerpt") or {}).get("text") or ""
+    assert "focused hit context" in entry["reasons"]
+    assert "def _discovery_terms" in excerpt
+    assert "explicit = bool(terms or symbols)" in excerpt
+    assert "base = effective_terms" in excerpt
+    assert "if explicit:" in excerpt
+    assert len(json.dumps(result, separators=(",", ":"))) <= 3600
+
+
 def test_focused_compaction_never_evicts_caller_path(tmp_path: Path):
     repo = _repo(tmp_path)
 
@@ -347,6 +471,128 @@ def test_focused_compaction_preserves_exact_hit_context_over_no_hit_focus_excerp
     exact_hit = by_path["tests/test_budget_terms.py"]
     assert 'terms = ["max_result_evidence_chars"]' in exact_hit["excerpt"]["text"]
     assert len(json.dumps(result, separators=(",", ":"))) <= 3600
+
+
+def test_focused_named_config_paths_recover_task_terms_when_guessed_identifiers_miss(
+    tmp_path: Path,
+):
+    repo = _repo(tmp_path)
+    (repo / "gremlins.toml").write_text(
+        "\n".join([
+            "[limits]",
+            "max_evidence_chars = 48000",
+            "max_result_evidence_chars = 8000",
+            "max_file_chars = 16000",
+        ]) + "\n",
+        encoding="utf-8",
+    )
+    (repo / "src" / "gremlins").mkdir()
+    (repo / "src" / "gremlins" / "config.py").write_text(
+        "\n".join([
+            "class Limits:",
+            "    max_task_chars: int",
+            "    max_evidence_chars: int",
+            "    max_result_evidence_chars: int",
+            "    max_file_chars: int",
+        ]) + "\n",
+        encoding="utf-8",
+    )
+    (repo / "src" / "gremlins" / "evidence_service.py").write_text(
+        "\n".join([
+            "def evidence_pack(config, detail):",
+            "    result_budget = 3600 if detail == 'focused' else 8000",
+            "    return {'result_budget_chars': result_budget}",
+        ]) + "\n",
+        encoding="utf-8",
+    )
+    (repo / "tests" / "test_budget_words.py").write_text(
+        "\n".join([
+            "def test_frontier_budget_words():",
+            '    size_budget = "frontier-facing"',
+            "    assert size_budget",
+        ]) + "\n",
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "add", "."], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "add budget recovery fixture"], cwd=repo, check=True)
+
+    result = evidence_pack(
+        str(repo),
+        "Find the frontier-facing evidence size budget and configured default.",
+        _config_for(repo),
+        detail="focused",
+        paths=["gremlins.toml", "src/gremlins/config.py", "src/gremlins/evidence_service.py"],
+        terms=["size_budget", "frontier-facing"],
+        symbols=["size_budget"],
+        include_history=False,
+        include_tests=False,
+        max_files=4,
+    )
+
+    by_path = {item["path"]: item for item in result["files"]}
+    assert "gremlins.toml" in by_path
+    assert "src/gremlins/config.py" in by_path
+    assert "src/gremlins/evidence_service.py" in by_path
+
+    toml = by_path["gremlins.toml"]
+    config = by_path["src/gremlins/config.py"]
+    assert "evidence" in [term.lower() for term in toml["recovery_terms"]]
+    assert "evidence" in [term.lower() for term in config["recovery_terms"]]
+    assert any(
+        "max_result_evidence_chars = 8000" in hit["text"]
+        for hit in toml["hits"]
+    )
+    assert any(
+        "max_result_evidence_chars" in hit["text"]
+        for hit in config["hits"]
+    )
+    assert len(json.dumps(result, separators=(",", ":"))) <= 3600
+
+
+def test_exact_verification_keeps_preceding_setup_when_only_later_hit_is_returned(tmp_path: Path):
+    repo = _repo(tmp_path)
+    path = "tests/test_self_poison.py"
+    lines = [
+        "def test_budget_mapping():",
+        '    task = "Find the frontier-facing evidence size budget."',
+        '    terms = ["max_result_evidence_chars"]',
+        "    assert terms",
+        *[f"    padding_{index} = {index}" for index in range(10)],
+        '    verification = "identifier size_budget and all literal frontier-facing occurrences"',
+        "    assert verification",
+    ]
+    (repo / path).write_text("\n".join(lines) + "\n", encoding="utf-8")
+    subprocess.run(["git", "add", path], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "add self-poison fixture"], cwd=repo, check=True)
+
+    later_line = lines.index(
+        '    verification = "identifier size_budget and all literal frontier-facing occurrences"'
+    ) + 1
+    hit = Evidence(
+        id="search:self-poison",
+        kind="search",
+        path=path,
+        start_line=later_line,
+        end_line=later_line,
+        text=lines[later_line - 1],
+    )
+
+    excerpt = _focused_hit_context_excerpt(
+        repo,
+        path,
+        [hit],
+        (
+            "Exact verification: show the definition and value associated with "
+            "identifier size_budget and all literal frontier-facing occurrences."
+        ),
+        ["size_budget", "frontier-facing"],
+        _config_for(repo),
+    )
+
+    assert excerpt is not None
+    assert 'task = "Find the frontier-facing evidence size budget."' in excerpt.text
+    assert 'terms = ["max_result_evidence_chars"]' in excerpt.text
+    assert "verification =" in excerpt.text
 
 
 def test_focused_python_definition_prefers_exact_parameter_hints_over_fallback_helper(tmp_path: Path):

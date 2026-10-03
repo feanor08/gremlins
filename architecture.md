@@ -565,7 +565,7 @@ return compact result
 
 The parent agent should receive selected evidence rather than re-reading the repository broadly.
 
-The orchestrator may supply exact `terms` and `symbols` when it already knows the likely identifiers. Those explicit terms override Gremlins' fallback keyword guessing. For simple location/reference tasks, `mode=auto` can return deterministic evidence without invoking the local model; `mode=deterministic` forces that behavior, while `mode=model` requests local synthesis.
+The orchestrator may supply exact `terms` and `symbols` when it already knows the likely identifiers. Those explicit terms override Gremlins' fallback keyword guessing for repository-wide discovery. In a focused evidence request, if those exact terms miss inside a path already bounded by the request, Gremlins may perform bounded task-derived literal recovery within that path only. Bounded paths are either paths the orchestrator explicitly selected or tracked companion files that an already-relevant source file names literally (for example, `src/gremlins/config.py` naming `gremlins.toml`). Companion promotion and local recovery are deterministic structural relations; they never broaden repository-wide discovery terms. For simple location/reference tasks, `mode=auto` can return deterministic evidence without invoking the local model; `mode=deterministic` forces that behavior, while `mode=model` requests local synthesis.
 
 The evidence used internally by the local model may be larger than the evidence returned to the frontier orchestrator. Returned evidence is separately bounded and prioritizes cited/selected items so Gremlins does not recreate the context problem it is intended to solve.
 

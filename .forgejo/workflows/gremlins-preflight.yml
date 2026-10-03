@@ -1,0 +1,54 @@
+name: Gremlins deterministic preflight
+
+on:
+  workflow_dispatch:
+    inputs:
+      proof_id:
+        description: Unique generic-* proof identifier
+        required: true
+        type: string
+
+jobs:
+  deterministic-preflight:
+    name: THG ARM64 proof ${{ inputs.proof_id }} sha=${{ forgejo.sha }}
+    runs-on: thg-arm64-docker
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify exact Forgejo SHA
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+
+      - name: Install deterministic test runtime
+        run: |
+          set -euo pipefail
+          apt-get update -qq
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            ca-certificates curl git python3 python3-venv ripgrep
+          python3 -m venv /tmp/gremlins-ci
+          /tmp/gremlins-ci/bin/pip install --quiet uv
+          /tmp/gremlins-ci/bin/uv sync --locked
+
+      - name: Targeted retrieval and evidence tests
+        run: |
+          set -euo pipefail
+          /tmp/gremlins-ci/bin/uv run pytest -q \
+            tests/test_retrieval.py \
+            tests/test_evidence_service.py
+
+      - name: Full deterministic test suite
+        run: |
+          set -euo pipefail
+          /tmp/gremlins-ci/bin/uv run pytest -q
+
+      - name: MCP smoke
+        run: |
+          set -euo pipefail
+          /tmp/gremlins-ci/bin/uv run gremlins mcp-smoke
+
+      - name: Frontier-treatment deterministic preflight
+        run: |
+          set -euo pipefail
+          /tmp/gremlins-ci/bin/uv run python scripts/ci/forgejo_preflight.py

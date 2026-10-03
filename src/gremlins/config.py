@@ -5,6 +5,11 @@ from pathlib import Path
 import os
 import tomllib
 
+try:
+    import pwd
+except ImportError:  # pragma: no cover - non-POSIX fallback
+    pwd = None
+
 
 @dataclass(frozen=True)
 class ProviderConfig:
@@ -46,8 +51,23 @@ class Config:
     profile: str = "mac-local"
 
 
+def _account_home() -> Path:
+    """Return the OS account home, independent of a process-local HOME override."""
+    if pwd is not None:
+        try:
+            return Path(pwd.getpwuid(os.getuid()).pw_dir).resolve()
+        except (KeyError, OSError):
+            pass
+    return Path.home().resolve()
+
+
 def _expand(path: str) -> Path:
-    return Path(os.path.expandvars(path)).expanduser().resolve()
+    expanded = os.path.expandvars(path)
+    if expanded == "~":
+        return _account_home()
+    if expanded.startswith("~/"):
+        return (_account_home() / expanded[2:]).resolve()
+    return Path(expanded).expanduser().resolve()
 
 
 def project_root() -> Path:

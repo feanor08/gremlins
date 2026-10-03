@@ -281,6 +281,51 @@ def _python_neighbors(
     return neighbors[:limit]
 
 
+def _tracked_file_neighbors(
+    repo: Path,
+    seed_paths: Sequence[str],
+    config: Config,
+    limit: int = 8,
+) -> list[str]:
+    """Return tracked files literally referenced by already-relevant files."""
+    tracked = _tracked_paths(repo, config)
+    tracked_set = set(tracked)
+    basename_counts: dict[str, int] = defaultdict(int)
+    for path in tracked:
+        basename_counts[Path(path).name] += 1
+
+    neighbors: list[str] = []
+    for seed in seed_paths:
+        if seed not in tracked_set:
+            continue
+        try:
+            text = resolve_repo_file(repo, seed).read_text(
+                encoding="utf-8",
+                errors="replace",
+            )
+        except OSError:
+            continue
+
+        for candidate in tracked:
+            if candidate == seed or candidate in neighbors:
+                continue
+            basename = Path(candidate).name
+            full_literal = candidate in text
+            unique_basename_literal = (
+                basename_counts[basename] == 1
+                and re.search(
+                    rf"""["']{re.escape(basename)}["']""",
+                    text,
+                )
+                is not None
+            )
+            if full_literal or unique_basename_literal:
+                neighbors.append(candidate)
+                if len(neighbors) >= limit:
+                    return neighbors
+    return neighbors
+
+
 def _top_paths(
     repo: Path,
     evidence: list[Evidence],
@@ -343,7 +388,11 @@ def _top_paths(
     )
 
     source_seeds = [path for path in prelim if _path_role(path) == "source"][:5]
-    structural = set(_python_neighbors(repo, source_seeds, config, limit=10))
+    python_structural = set(_python_neighbors(repo, source_seeds, config, limit=10))
+    literal_structural = set(
+        _tracked_file_neighbors(repo, source_seeds, config, limit=8)
+    )
+    structural = python_structural | literal_structural
     for path in structural:
         if path not in candidates:
             candidates.append(path)
@@ -415,14 +464,21 @@ def _related_path_index(
         if item.kind == "search" and item.path and (repo / item.path).is_file():
             hits_by_path[item.path].append(item)
 
-    structural = set(
+    selected_sources = [
+        path for path in selected_paths if _path_role(path) == "source"
+    ][:6]
+    python_structural = set(
         _python_neighbors(
             repo,
-            [path for path in selected_paths if _path_role(path) == "source"][:6],
+            selected_sources,
             config,
             limit=12,
         )
     )
+    literal_structural = set(
+        _tracked_file_neighbors(repo, selected_sources, config, limit=10)
+    )
+    structural = python_structural | literal_structural
     tracked = _tracked_paths(repo, config)
 
     # Test/source filename affinity is cheap, deterministic, and was a common
@@ -815,20 +871,40 @@ def _focused_hit_context_excerpt(
     search_terms: Sequence[str],
     config: Config,
 ) -> Evidence | None:
-    """Return compact multi-region context when exact code hits matter more than a definition."""
+    """Return compact exact-hit context when literal code evidence should outrank a definition."""
     intent = task.lower()
-    if not any(word in intent for word in ("around", "context", "handler", "branch", "hit-centered")):
+    exact_verification = any(
+        phrase in intent
+        for phrase in (
+            "exact verification",
+            "exact final verification",
+            "verify exact",
+            "exact implementation",
+        )
+    )
+    contextual_request = any(
+        word in intent for word in ("around", "context", "handler", "branch", "hit-centered")
+    )
+    if not (exact_verification or contextual_request):
         return None
 
-    code_terms = [
-        term.strip().lower()
-        for term in search_terms
-        if term.strip()
-        and (
+    code_terms: list[str] = []
+    for raw_term in search_terms:
+        term = raw_term.strip().lower()
+        if not term:
+            continue
+        code_shaped = (
             any(char in term for char in ("=", ":", "(", ")", '"', "'"))
-            or term.strip().lower().startswith(("except ", "return ", "raise "))
+            or term.startswith(("except ", "return ", "raise "))
         )
-    ]
+        # Exact-verification callers often do not know the enclosing symbol yet
+        # and therefore supply compact source fragments such as "terms or".
+        # Treat those short literal phrases as anchors without broadening normal
+        # focused searches into arbitrary prose matching.
+        literal_phrase = exact_verification and len(term.split()) <= 4
+        if code_shaped or literal_phrase:
+            code_terms.append(term)
+
     if not code_terms:
         return None
 
@@ -857,11 +933,12 @@ def _focused_hit_context_excerpt(
     clusters = clusters[:2]
 
     # A repository-wide literal search may cap later matches before every
-    # same-file status line is returned. Complete each exact handler cluster
-    # from the already-open source so nearby requested literals survive.
+    # same-file literal is returned. Complete each exact cluster from the
+    # already-open source so caller-supplied fragments survive.
     for cluster in clusters:
+        scan_start = max(1, min(cluster) - 16)
         scan_end = min(len(lines), max(cluster) + 16)
-        for line in range(min(cluster), scan_end + 1):
+        for line in range(scan_start, scan_end + 1):
             if any(term in lines[line - 1].lower() for term in code_terms):
                 cluster.append(line)
         cluster[:] = sorted(set(cluster))
@@ -879,33 +956,65 @@ def _focused_hit_context_excerpt(
 
     sections: list[str] = []
     selected_lines: list[int] = []
+    seen_function_spans: set[tuple[int, int]] = set()
     for cluster in clusters:
-        start = max(1, min(cluster) - 1)
-        end = min(len(lines), max(cluster) + 2)
         containing = [
             node for node in functions
             if int(getattr(node, "lineno", 0)) <= min(cluster)
             <= int(getattr(node, "end_lineno", 0))
         ]
-        function_line = None
-        if containing:
-            enclosing = min(
+        enclosing = (
+            min(
                 containing,
-                key=lambda node: int(getattr(node, "end_lineno", 0)) - int(getattr(node, "lineno", 0)),
+                key=lambda node: int(getattr(node, "end_lineno", 0))
+                - int(getattr(node, "lineno", 0)),
             )
-            function_line = int(getattr(enclosing, "lineno", 0))
+            if containing
+            else None
+        )
 
-        priority_lines: list[int] = []
-        if function_line and function_line < start:
-            priority_lines.append(function_line)
-        priority_lines.extend(cluster)
-        context_lines = [
-            line for line in range(start, end + 1)
-            if line not in priority_lines
-        ]
-        # Put the enclosing definition and exact requested hits first so a
-        # compact wire-budget trim cannot discard a later handler/status pair.
-        section_lines = [*priority_lines, *context_lines]
+        if exact_verification and enclosing is not None:
+            function_start = int(getattr(enclosing, "lineno", 0))
+            function_end = int(getattr(enclosing, "end_lineno", function_start))
+            function_span = (function_start, function_end)
+            if function_span in seen_function_spans:
+                continue
+            seen_function_spans.add(function_span)
+
+            if function_end - function_start + 1 <= 24:
+                section_lines = list(range(function_start, function_end + 1))
+            else:
+                # Exact-verification hits often occur in the assertion/call at
+                # the end of a test or helper while the useful binding/setup
+                # sits immediately before it. Bias the bounded window backward
+                # so a task-string hit cannot hide the nearby identifier/value
+                # mapping that gives the hit meaning.
+                start = max(function_start, min(cluster) - 18)
+                end = min(function_end, max(cluster) + 5)
+                section_lines = [function_start]
+                section_lines.extend(
+                    line
+                    for line in range(start, end + 1)
+                    if line != function_start
+                )
+        else:
+            start = max(1, min(cluster) - 1)
+            end = min(len(lines), max(cluster) + 2)
+            function_line = (
+                int(getattr(enclosing, "lineno", 0))
+                if enclosing is not None
+                else None
+            )
+            priority_lines: list[int] = []
+            if function_line and function_line < start:
+                priority_lines.append(function_line)
+            priority_lines.extend(cluster)
+            context_lines = [
+                line for line in range(start, end + 1)
+                if line not in priority_lines
+            ]
+            section_lines = [*priority_lines, *context_lines]
+
         selected_lines.extend(section_lines)
         sections.append("\n".join(f"L{line}: {lines[line - 1]}" for line in section_lines))
 
@@ -921,6 +1030,54 @@ def _focused_hit_context_excerpt(
     )
 
 
+def _focused_path_local_recovery_hits(
+    repo: Path,
+    path: str,
+    task: str,
+    search_terms: Sequence[str],
+    config: Config,
+    limit: int = 4,
+) -> tuple[list[Evidence], list[str]]:
+    """Recover task context only inside an already bounded path.
+
+    Explicit focus terms remain authoritative for repository-wide discovery.
+    When those terms miss inside a path already bounded by caller focus or a
+    literal tracked-file relationship, use a few task-derived literals locally
+    so the path does not collapse into an empty stub merely because the caller
+    guessed the identifier differently. This never broadens repository search.
+    """
+    explicit = {term.strip().lower() for term in search_terms if term.strip()}
+    candidates: list[str] = []
+    for raw in candidate_terms(task):
+        term = raw.strip().strip(".,:;!?()[]{}")
+        if len(term) < 3 or term.lower() in explicit:
+            continue
+        if term.lower() in _STOP_WORDS:
+            continue
+        if term.lower() not in {value.lower() for value in candidates}:
+            candidates.append(term)
+        if len(candidates) >= 6:
+            break
+
+    recovered: list[Evidence] = []
+    matched_terms: list[str] = []
+    seen: set[tuple[int | None, str]] = set()
+    for term in candidates:
+        hits = literal_search(repo, term, config, scope=path)
+        if not hits:
+            continue
+        matched_terms.append(term)
+        for hit in hits:
+            key = (hit.start_line, hit.text)
+            if key in seen:
+                continue
+            seen.add(key)
+            recovered.append(hit)
+            if len(recovered) >= limit:
+                return recovered, matched_terms
+    return recovered, matched_terms
+
+
 def _file_entry(
     repo: Path,
     path: str,
@@ -929,9 +1086,21 @@ def _file_entry(
     config: Config,
     focused: bool,
     task: str,
+    literal_companion: bool = False,
 ) -> dict:
     all_hits = [item for item in evidence if item.kind == "search" and item.path == path]
-    hits = all_hits[:4 if focused else 3]
+    recovery_terms: list[str] = []
+    local_recovery = focused or literal_companion
+    if local_recovery and not all_hits:
+        recovered_hits, recovery_terms = _focused_path_local_recovery_hits(
+            repo,
+            path,
+            task,
+            search_terms,
+            config,
+        )
+        all_hits = recovered_hits
+    hits = all_hits[:4 if local_recovery else 3]
     excerpt = next(
         (item for item in evidence if item.kind == "file" and item.path == path),
         None,
@@ -967,15 +1136,26 @@ def _file_entry(
             excerpt = None
 
     matched = _search_terms_for_path(path, hits, search_terms)
-    score = len(set(term.lower() for term in matched)) * 10 + len(hits) * 2 + (6 if focused else 0)
-    return {
+    score = (
+        len(set(term.lower() for term in matched)) * 10
+        + len(hits) * 2
+        + (6 if focused else 0)
+        + (3 if literal_companion else 0)
+    )
+    entry = {
         "path": path,
         "role": _path_role(path),
         "score": score,
         "reasons": (
             (["caller-focused path"] if focused else [])
+            + (["literal tracked-file companion"] if literal_companion else [])
             + (["focused hit context"] if hit_context_excerpt is not None else [])
             + (["focused symbol definition"] if definition_excerpt is not None else [])
+            + (
+                [f"path-local task recovery: {', '.join(recovery_terms[:2])}"]
+                if recovery_terms
+                else []
+            )
             + ([f"matched {len(set(matched))} query term(s)"] if matched else ["path/name relevance"])
         ),
         "matched_terms": matched[:8],
@@ -993,6 +1173,9 @@ def _file_entry(
             else None
         ),
     }
+    if recovery_terms:
+        entry["recovery_terms"] = recovery_terms[:4]
+    return entry
 
 
 def _history_bundle(
@@ -1195,6 +1378,18 @@ def evidence_pack(
         str(resolve_repo_file(repo, path).relative_to(repo))
         for path in (paths or [])
     }
+    literal_companions = set(
+        _tracked_file_neighbors(
+            repo,
+            [
+                path
+                for path in selected_paths
+                if _path_role(path) == "source"
+            ],
+            config,
+            limit=8,
+        )
+    )
 
     files = [
         _file_entry(
@@ -1205,6 +1400,7 @@ def evidence_pack(
             config,
             focused=path in focused,
             task=task,
+            literal_companion=path in literal_companions,
         )
         for path in selected_paths
     ]
