@@ -309,6 +309,18 @@ Near-term architectural work:
 
 Longer-term work may include multi-node capability routing, Android providers, richer worker registries, and separately secured write-capable operations.
 
+## Development and CI authority
+
+Gremlins uses a split authoring/validation flow:
+
+- **GitHub is the canonical authoring source.** Code changes, branches, reviews, and exact commit identities originate here.
+- **Forgejo runs the deterministic pre-frontier gate.** The exact GitHub candidate SHA is synchronized to Forgejo and `.forgejo/workflows/gremlins-preflight.yml` runs targeted retrieval/evidence tests, the full deterministic pytest suite, MCP smoke, and the repo-002/repo-003 evidence replays on the shared `thg-arm64-docker` lane.
+- **The Forgejo preflight must not call Claude, Codex, or a local model.** Its purpose is to reject deterministic/runtime defects before frontier quota is spent.
+- **Mac frontier treatment remains a separate integration gate.** After deterministic Forgejo CI passes, the controlled Codex/Claude B/C harness can validate treatment behavior and raw traces on the reference Mac environment.
+- GitHub-hosted CI may provide useful advisory signal, but it does not replace the Forgejo deterministic gate or the Mac frontier-treatment evidence.
+
+This keeps source authority, deterministic CI execution, and frontier-client measurement separate while binding all three to an exact commit SHA.
+
 ## Contributing
 
 Contributions are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md).
